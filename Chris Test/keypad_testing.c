@@ -1,4 +1,5 @@
-#include <MKL25Z4.H>
+#include "MKL25Z4.h"
+#include "board.h"
 
 typedef uint8_t boolean;  // Since Embedded C does not have a standard type for
                           // booleans, using uint8_t as boolean. MUST CHECK WITH
@@ -28,6 +29,8 @@ void delayUs(int n);
  */
 int main(void)
 {
+    BOARD_InitBootClocks();  // Set system clock to 48 MHz internal clock
+
     // Initialize Interfaces
     KP_init();
     UART0_init();
@@ -170,8 +173,8 @@ void UART0_init(void)
     SIM->SOPT2 |= SIM_SOPT2_UART0SRC(1);  // Use FLL output for UART0 Baud rate generator
     UART0->C2   = 0;                      // Turn off UART0 while changing configurations
     UART0->C4   = UART0_C4_OSR(15);       // Over Sampling Ratio (15+1)
-    UART0->BDH  = UART0_BDH_SBR(0);       // SBR12:SBR8 = 0x0  (9600 Baud, 20.97 MHz clock)
-    UART0->BDL  = UART0_BDL_SBR(137);     // SBR7:SBR0  = 0x89 (9600 Baud, 20.97 MHz clock)
+    UART0->BDH  = UART0_BDH_SBR(0);       // SBR12:SBR8 = 0x0  (115200 Baud, 48 MHz clock)
+    UART0->BDL  = UART0_BDL_SBR(26);     // SBR7:SBR0   = 0x1A (115200 Baud, 48 MHz clock)
     UART0->C1   = UART0_C1_M(0);          // 8-bit data
     UART0->C2   = UART0_C2_TE(1) |        // Enable transmit & receive
                   UART0_C2_RE(1);
@@ -199,7 +202,7 @@ void UART0_Transmit_Poll(uint8_t data)
 /*
  * This function delays (blocking) by approximately (n) milliseconds.
  *
- * Note: The CPU clock is set to 20.97 MHz.
+ * Note: The CPU clock is set to 48 MHz.
  *
  * Arguments:
  * - n: The number of milliseconds to delay by.
@@ -215,7 +218,7 @@ void delayMs(int n)
 /*
  * This function delays (blocking) by approximately (n) microseconds.
  *
- * Note: The CPU clock is set to 20.97 MHz.
+ * Note: The CPU clock is set to 48 MHz.
  *
  * Arguments:
  * - n: The number of microseconds to delay by.
