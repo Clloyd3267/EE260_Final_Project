@@ -1,7 +1,7 @@
 #include "MKL25Z4.h"
 #include "board.h"
 
-#define SYSTEM_CLOCK 48000000
+#define SYSTEM_CLOCK 48000000  // 48 Mhz system clock
 
 typedef uint8_t boolean;  // Since Embedded C does not have a standard type for
                           // booleans, using uint8_t as boolean. MUST CHECK WITH
@@ -22,7 +22,6 @@ void delayTicks(int ticks);
 void delayMs(int ms);
 void delayUs(int us);
 
-
 /*
  * This function is the main function of the project.
  *
@@ -36,40 +35,17 @@ int main(void)
     BOARD_InitBootClocks();  // Set system clock to 48 MHz internal clock
 
     // Initialize Interfaces
+    __disable_irq();         // Global disable IRQs (during setup)
     KP_init();
+    __enable_irq();          // Global enable IRQs (after setup)
     UART0_init();
 
-    unsigned char key;  // Actual value of key press
-    char keyChar;       // Character representation of value of key press
-
-    while (1) // Main program execution loop
-    {
-        if (KP_keyPressed())    // Wait for key press
-        {
-            key = KP_getkey();  // Get pressed key from keypad
-            if (key != 0x0)     // Ensure key was not released too soon
-            {
-                // Get character representation of key
-                keyChar = KP_KeyChars[key];
-
-                // Output the most recent key press char to UART0
-                UART0_Transmit_Poll(keyChar);
-                UART0_Transmit_Poll('\r');
-                UART0_Transmit_Poll('\n');
-
-                /*
-                 * Blocking Delay to allow for time between key presses.
-                 * Approximately 500 MS of delay. // CDL=> Could be removed later
-                 */
-                delayMs(500);
-            }
-        }
-    }
+    while (1) {} // Main program execution loop
 }
 
 /*
  * This function initializes PortC for the keypad.
- * All pins are configured as GPIO input pin with pull-up enabled.
+ * All pins are configured as GPIO input pin with pull-up enabled. CDL=> label cols and rows
  *
  * Arguments: None
  *
@@ -77,17 +53,60 @@ int main(void)
  */
 void KP_init(void)
 {
-    SIM->SCGC5   |= SIM_SCGC5_PORTD(1);  // Enable clock to Port D
+    SIM->SCGC5    |= SIM_SCGC5_PORTD(1);   // Enable clock to Port D
 
-    // PTC0-PTC7 as GPIO and enable pullups
-    PORTD->PCR[0] = PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);  // Row 1
-    PORTD->PCR[2] = PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);  // Row 2
-    PORTD->PCR[3] = PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);  // Col 1
-    PORTD->PCR[4] = PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);  // Col 2
-    PORTD->PCR[5] = PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);  // Col 3
+    // Row 1 and 2 as GPIO with enabled pullups
+    PORTD->PCR[0] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);  // Row 1
+    PORTD->PCR[2] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);  // Row 2
 
-    PTD->PDDR     = GPIO_PDDR_PDD(0x05);   // Make PTD0 and PTD2 output pins, PTD5-3 as inputs
-    PTD->PCOR     = GPIO_PCOR_PTCO(0x05);  // Enable all rows
+    // Col 1 as GPIO with enabled pullups and falling edge interrupt
+    PORTD->PCR[3] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);
+    PORTD->PCR[3] &= ~PORT_PCR_IRQC(0xF);  // Clear interrupt selection
+    PORTD->PCR[3] |= PORT_PCR_IRQC(0xA);   // Enable falling edge interrupt
+
+    // Col 2 as GPIO with enabled pullups and falling edge interrupt
+    PORTD->PCR[4] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);
+    PORTD->PCR[4] &= ~PORT_PCR_IRQC(0xF);  // Clear interrupt selection
+    PORTD->PCR[4] |= PORT_PCR_IRQC(0xA);   // Enable falling edge interrupt
+
+    // Col 3 as GPIO with enabled pullups and falling edge interrupt
+    PORTD->PCR[5] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);
+    PORTD->PCR[5] &= ~PORT_PCR_IRQC(0xF);  // Clear interrupt selection
+    PORTD->PCR[5] |= PORT_PCR_IRQC(0xA);   // Enable falling edge interrupt
+
+    PTD->PDDR      = GPIO_PDDR_PDD(0x05);  // Make rows outputs, cols inputs
+    PTD->PCOR      = GPIO_PCOR_PTCO(0x05); // Enable all rows
+
+    NVIC_EnableIRQ(PORTD_IRQn);            // Enable IRQ31 (PTD interrupts)
+}
+
+/*
+ * This interrupt function takes finds the key pressed on the matrix keypad when
+ * an interrupt occurs.
+ *
+ * Gets called (interrupts) when any of the keypad cols have a falling edge.
+ *
+ * Arguments: None (void)
+ *
+ * Return: None (void)
+ */
+void PORTD_IRQHandler(void)
+{
+    unsigned char key;  // Actual value of key press
+    char keyChar;       // Character representation of value of key press
+
+    key = KP_getkey();  // Get pressed key from keypad
+    if (key != 0x0)     // Ensure key was not released too soon
+    {
+        // Get character representation of key
+        keyChar = KP_KeyChars[key];
+
+        // Output the most recent key press char to UART0
+        UART0_Transmit_Poll(keyChar);
+        UART0_Transmit_Poll('\r');
+        UART0_Transmit_Poll('\n');
+    }
+    PORTD->ISFR = PORT_ISFR_ISF(0x38);  // Clear interrupt flags
 }
 
 /*
