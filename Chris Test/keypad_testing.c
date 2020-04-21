@@ -1,6 +1,8 @@
 #include "MKL25Z4.h"
 #include "board.h"
 
+#define SYSTEM_CLOCK 48000000
+
 typedef uint8_t boolean;  // Since Embedded C does not have a standard type for
                           // booleans, using uint8_t as boolean. MUST CHECK WITH
                           // IF STATEMENT. 0 -> False, Anything else -> True.
@@ -16,8 +18,10 @@ void UART0_init(void);
 void UART0_Transmit_Poll(uint8_t);
 
 // Other Functions
-void delayMs(int n);
-void delayUs(int n);
+void delayTicks(int ticks);
+void delayMs(int ms);
+void delayUs(int us);
+
 
 /*
  * This function is the main function of the project.
@@ -55,9 +59,9 @@ int main(void)
 
                 /*
                  * Blocking Delay to allow for time between key presses.
-                 * Approximately 100 MS of delay. 
+                 * Approximately 500 MS of delay. // CDL=> Could be removed later
                  */
-                delayMs(100);
+                delayMs(500);
             }
         }
     }
@@ -200,33 +204,58 @@ void UART0_Transmit_Poll(uint8_t data)
 }
 
 /*
- * This function delays (blocking) by approximately (n) milliseconds.
+ * This function delays (blocking) by approximately (ticks) ticks.
  *
  * Note: The CPU clock is set to 48 MHz.
  *
  * Arguments:
- * - n: The number of milliseconds to delay by.
+ * - ticks: The number of ticks to count down from.
  *
  * Return: None (void)
  */
-void delayMs(int n)
+void delayTicks(int ticks)
 {
-    for (int i = 0 ; i < n; i++)
-        for (int j = 0; j < 3500; j++) {}
+    SysTick->LOAD = ticks;  // Set timer for (ticks) ticks
+    SysTick->VAL = 0;       // Ensure timer is reset
+
+    // Use 48 Mhz / 16 clock and enable timer
+    SysTick->CTRL = SysTick_CTRL_ENABLE_Msk;
+
+    // CDL=> Is this allowed? Or do we have to use interrupts
+    // Wait for timer to reach 0 (count reached)
+    while ((SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk) == 0) {}
+
+    SysTick->CTRL = 0;  // Disable timer
 }
 
 /*
- * This function delays (blocking) by approximately (n) microseconds.
+ * This function delays (blocking) by approximately (ms) milliseconds.
  *
  * Note: The CPU clock is set to 48 MHz.
  *
  * Arguments:
- * - n: The number of microseconds to delay by.
+ * - ms: The number of milliseconds to delay by.
  *
  * Return: None (void)
  */
-void delayUs(int n)
+void delayMs(int ms)
 {
-    for (int i = 0 ; i < n; i++)
-        for (int j = 0; j < 5; j++) {}
+    // Set timer for (ms) ms
+    delayTicks((ms * (SYSTEM_CLOCK / 16)) / 1000);
+}
+
+/*
+ * This function delays (blocking) by approximately (us) microseconds.
+ *
+ * Note: The CPU clock is set to 48 MHz.
+ *
+ * Arguments:
+ * - us: The number of milliseconds to delay by.
+ *
+ * Return: None (void)
+ */
+void delayUs(int us)
+{
+    // Set timer for (us) us
+    delayTicks((us * (SYSTEM_CLOCK / 16)) / 1000000);
 }
