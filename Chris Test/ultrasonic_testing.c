@@ -1,15 +1,15 @@
-// PIN PTC2 = Trigger
+// PIN PTQ = Trigger
 // PIN PTE23 = echo
 #include <stdio.h>
 #include "board.h"
-#include "peripherals.h"
-#include "pin_mux.h"
-#include "clock_config.h"
+// #include "peripherals.h"
+// #include "pin_mux.h"
+// #include "clock_config.h"
 #include "MKL25Z4.h"
-#include "fsl_debug_console.h"
+// #include "fsl_debug_console.h"
 
-void Trigger_Timer0_init(void);
-void Capture_Timer2_init(void);
+void Trigger_Timer_init(void);
+void Capture_Timer_init(void);
 void UART0_init(void);
 void UART0Tx(char c);
 void UART0_puts(char* s);
@@ -42,102 +42,102 @@ int main(void) {
     PTB->PSOR |= 0x40000;       /* Set PTB18 to turn off red LED */
     PTB->PDDR |= 0x40000;       /* make PTB18 as output pin */
 
-    UART0_init();                   		    /* initialize UART0 for output */
-    sprintf(buffer, "\r\nUltrasonic sensor Testing"); 	/* convert to string */
+    UART0_init();                               /* initialize UART0 for output */
+    sprintf(buffer, "\r\nUltrasonic sensor Testing");   /* convert to string */
     UART0_puts(buffer);
 
-    __disable_irq();        					/* global disable IRQs */
-    Trigger_Timer0_init();                     	/* Configure PWM */
-    Capture_Timer2_init();
-    __enable_irq();         					/* global enable IRQs */
+    __disable_irq();                            /* global disable IRQs */
+    Trigger_Timer_init();                      /* Configure PWM */
+    Capture_Timer_init();
+    __enable_irq();                             /* global enable IRQs */
 
     while (1) {
     }
 }
 
-void Trigger_Timer0_init(void)
+void Trigger_Timer_init(void)
 {
     SIM->SCGC5 |= SIM_SCGC5_PORTA(1);       /* enable clock to Port A*/
     SIM->SCGC6 |= SIM_SCGC6_TPM1(1);   /* enable clock to TPM1 */
     SIM->SOPT2 |= SIM_SOPT2_TPMSRC(1);   /* use MCGFLLCLK as timer counter clock */
-    PORTA->PCR[12] = PORT_PCR_MUX(3);     /* PTA12 used by TPM1_CH0 */
+    PORTA->PCR[12] |= PORT_PCR_MUX(3);     /* PTA12 used by TPM1_CH0 */
 
     TPM1->SC = 0;               /* disable timer */
-    TPM1->CONTROLS[0].CnSC  = 0x80;   	  /* clear CHF  for Channel 1*/
+    TPM1->CONTROLS[0].CnSC  = 0x80;       /* clear CHF  for Channel 1*/
     TPM1->CONTROLS[0].CnSC |= 0x20|0x08;  /* edge-aligned, pulse high MSB:MSA=10, ELSB:ELSA=10*/
-    TPM1->CONTROLS[0].CnV   = 8;  		  /* Set up channel value for >10 us*/
-	TPM1->SC |= 0x06;           		  /* set timer with prescaler /64 */
-    TPM1->MOD = mod;            		  /* Set up modulo register = 44999 */
+    TPM1->CONTROLS[0].CnV   = 8;          /* Set up channel value for >10 us*/
+    TPM1->SC |= 0x06;                     /* set timer with prescaler /64 */
+    TPM1->MOD = mod;                      /* Set up modulo register = 44999 */
 //*************************PRE-Scaler settings **************************
-	TPM1->SC |= 0x08;           	      /* enable timer */
+    TPM1->SC |= 0x08;                     /* enable timer */
 //***********************************************************************
 }
 
 
-void Capture_Timer2_init(void)  // Also enables the TPM2_CH1 interrupt
+void Capture_Timer_init(void)  // Also enables the TPM2_CH1 interrupt
 {
-    SIM->SCGC5 |= 0x2000;       /* enable clock to Port E*/
-    SIM->SCGC6 |= 0x04000000;   /* enable clock to TPM2 */
-    PORTE->PCR[23] = 0x0300;    /* PTE23 used by TPM2_CH1 */
-    SIM->SOPT2 |= 0x01000000;   /* use MCGFLLCLK as timer counter clock */
-    TPM2->SC = 0;               /* disable timer */
+    SIM->SCGC5 |= SIM_SCGC5_PORTA(1);       /* enable clock to Port A*/
+    SIM->SCGC6 |= SIM_SCGC6_TPM1(1);   /* enable clock to TPM1 */
+    SIM->SOPT2 |= SIM_SOPT2_TPMSRC(1);
+    PORTA->PCR[13] |= PORT_PCR_MUX(3);    /* PTE23 used by TPM2_CH1 */
+    TPM1->SC = 0;               /* disable timer */
 
-    TPM2->CONTROLS[1].CnSC = 0x80;   	/* clear CHF  for Channel 1*/
+    TPM1->CONTROLS[1].CnSC = 0x80;      /* clear CHF  for Channel 1*/
 //  MSB:MSA=00, ELSB:ELSA=11 and set interrupt*/
 /*  capture on both edges, MSB:MSA=00, ELSB:ELSA=11 and set interrupt*/
-    TPM2->CONTROLS[1].CnSC |= TPM_CnSC_CHIE_MASK|TPM_CnSC_ELSB_MASK|TPM_CnSC_ELSA_MASK;
-    TPM2->MOD = mod;            		  /* Set up modulo register = 44999*/
-    TPM2->CONTROLS[1].CnV = (mod+1)/2 -1; /* Set up 50% dutycycle */
+    TPM1->CONTROLS[1].CnSC |= TPM_CnSC_CHIE_MASK|TPM_CnSC_ELSB_MASK|TPM_CnSC_ELSA_MASK;
+    TPM1->MOD = mod;                      /* Set up modulo register = 44999*/
+    TPM1->CONTROLS[1].CnV = (mod+1)/2 -1; /* Set up 50% dutycycle */
 
-	TPM2->SC |= 0x80;           /* clear TOF */
-	TPM2->SC |= 0x06;           /* enable timer with prescaler /2^6 = 64 */
+    TPM1->SC |= 0x80;           /* clear TOF */
+    TPM1->SC |= 0x06;           /* enable timer with prescaler /2^6 = 64 */
 //*************************PRE-Scaler settings *********************************************
-	TPM2->SC |= 0x08;           /* enable timer             */
+    TPM1->SC |= 0x08;           /* enable timer             */
 //******************************************************************************************
-    NVIC_EnableIRQ(TPM2_IRQn);  /* enable Timer2 interrupt in NVIC */
+    NVIC_EnableIRQ(TPM1_IRQn);  /* enable Timer2 interrupt in NVIC */
 }
 
 
-void TPM2_IRQHandler(void) {
-	while(!(TPM2->CONTROLS[1].CnSC & 0x80)) { } /* wait until the CHF is set */
-	cont[i%2] = TPM2->CONTROLS[1].CnV;
-	if(i%2 == 1){
+void TPM1_IRQHandler(void) {
+    while(!(TPM1->CONTROLS[1].CnSC & 0x80)) { } /* wait until the CHF is set */
+    cont[i%2] = TPM1->CONTROLS[1].CnV;
+    if(i%2 == 1){
 
-		if(cont[1] > cont[0] ){
-			pulse_width = cont[1] - cont[0];
-		}
-		    else {
-		    pulse_width = cont[1] - cont[0] + mod + 1;
-		}
+        if(cont[1] > cont[0] ){
+            pulse_width = cont[1] - cont[0];
+        }
+            else {
+            pulse_width = cont[1] - cont[0] + mod + 1;
+        }
 
-		sprintf(buffer, "Pulse width %d \r\n", pulse_width); /* convert to string */
-		UART0_puts(buffer);
-		distance = (float)(pulse_width*2/3)*0.0343;
+        sprintf(buffer, "Pulse width %d \r\n", pulse_width); /* convert to string */
+        UART0_puts(buffer);
+        distance = (float)(pulse_width*2/3)*0.0343;
 
-		tmpInt1 = distance;
-		tmpFrac = distance - tmpInt1;
-		tmpInt2 = (tmpFrac * 10000);
+        tmpInt1 = distance;
+        tmpFrac = distance - tmpInt1;
+        tmpInt2 = (tmpFrac * 10000);
 
-	    sprintf(buffer, "Distance %d.%04d cm\r\n", tmpInt1, tmpInt2); /* convert to string */
-	    UART0_puts(buffer);
+        sprintf(buffer, "Distance %d.%04d cm\r\n", tmpInt1, tmpInt2); /* convert to string */
+        UART0_puts(buffer);
 
-		distance = (float)(distance/2.54);
+        distance = (float)(distance/2.54);
 
-		tmpInt1 = distance;
-		tmpFrac = distance - tmpInt1;
-		tmpInt2 = (tmpFrac * 10000);
+        tmpInt1 = distance;
+        tmpFrac = distance - tmpInt1;
+        tmpInt2 = (tmpFrac * 10000);
 
-	    sprintf(buffer, "Distance %d.%04d inches\r\n", tmpInt1, tmpInt2); /* convert to string */
-	    UART0_puts(buffer);
+        sprintf(buffer, "Distance %d.%04d inches\r\n", tmpInt1, tmpInt2); /* convert to string */
+        UART0_puts(buffer);
 
-    	if(distance < (float)6.0)
-    	    PTB->PCOR |= 0x40000;       /* Clear PTB18 to turn on red LED */
-    	else
-    	    PTB->PSOR |= 0x40000;       /* Set PTB18 to turn off red LED */
-	}
-	i++;
+        if(distance < (float)6.0)
+            PTB->PCOR |= 0x40000;       /* Clear PTB18 to turn on red LED */
+        else
+            PTB->PSOR |= 0x40000;       /* Set PTB18 to turn off red LED */
+    }
+    i++;
 /*---------------------------------------------------------------------*/
-    TPM2->CONTROLS[1].CnSC |= 0x80;    /* clear CHF */
+    TPM1->CONTROLS[1].CnSC |= 0x80;    /* clear CHF */
 }
 
 
