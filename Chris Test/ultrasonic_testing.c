@@ -57,19 +57,19 @@ int main(void) {
 
 void Trigger_Timer0_init(void)
 {
-    SIM->SCGC5 |= 0x0800;       /* enable clock to Port C*/
-    SIM->SCGC6 |= 0x01000000;   /* enable clock to TPM0 */
-    SIM->SOPT2 |= 0x01000000;   /* use MCGFLLCLK as timer counter clock */
-    PORTC->PCR[2] = 0x0400;     /* PTC2 used by TPM0_CH1 */
+    SIM->SCGC5 |= SIM_SCGC5_PORTA(1);       /* enable clock to Port A*/
+    SIM->SCGC6 |= SIM_SCGC6_TPM1(1);   /* enable clock to TPM1 */
+    SIM->SOPT2 |= SIM_SOPT2_TPMSRC(1);   /* use MCGFLLCLK as timer counter clock */
+    PORTA->PCR[12] = PORT_PCR_MUX(3);     /* PTA12 used by TPM1_CH0 */
 
-    TPM0->SC = 0;               /* disable timer */
-    TPM0->CONTROLS[1].CnSC  = 0x80;   	  /* clear CHF  for Channel 1*/
-    TPM0->CONTROLS[1].CnSC |= 0x20|0x08;  /* edge-aligned, pulse high MSB:MSA=10, ELSB:ELSA=10*/
-    TPM0->CONTROLS[1].CnV   = 8;  		  /* Set up channel value for >10 us*/
-	TPM0->SC |= 0x06;           		  /* set timer with prescaler /64 */
-    TPM0->MOD = mod;            		  /* Set up modulo register = 44999 */
+    TPM1->SC = 0;               /* disable timer */
+    TPM1->CONTROLS[0].CnSC  = 0x80;   	  /* clear CHF  for Channel 1*/
+    TPM1->CONTROLS[0].CnSC |= 0x20|0x08;  /* edge-aligned, pulse high MSB:MSA=10, ELSB:ELSA=10*/
+    TPM1->CONTROLS[0].CnV   = 8;  		  /* Set up channel value for >10 us*/
+	TPM1->SC |= 0x06;           		  /* set timer with prescaler /64 */
+    TPM1->MOD = mod;            		  /* Set up modulo register = 44999 */
 //*************************PRE-Scaler settings **************************
-	TPM0->SC |= 0x08;           	      /* enable timer */
+	TPM1->SC |= 0x08;           	      /* enable timer */
 //***********************************************************************
 }
 
