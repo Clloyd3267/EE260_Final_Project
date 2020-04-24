@@ -1,0 +1,113 @@
+/* 
+ * Name        : lcdDisplay.c (Initialize and display "hello" on the LCD using 4-bit data mode)
+ * Author(s)   : John Bourikas, Wayne Welles, Chris Lloyd
+ * Class       : EE260 (Project 3 - Part 1)
+ * Due Date    : 2020-02-19
+ * Description : All interface uses Port B.  Bit 7-4 are used for data. 
+ *               Bit 4, 2, 1 are used for control. This program does not poll 
+ *               the status of the LCD. It uses delay to wait out the time LCD 
+ *               controller is busy. Timing is more relax than the HD44780 
+ *               datasheet to accommodate the variations of the devices.
+ *               You may want to adjust the amount of delay for your LCD
+ *               controller.
+ *
+ * Note: This file is based on p3_3.c
+ */
+
+#include <MKL25Z4.H>
+
+#define RS 1    /* BIT0 mask */
+#define RW 2    /* BIT1 mask */
+#define EN 4    /* BIT2 mask */
+
+void delayMs(int n);
+void delayUs(int n);
+void LCD_nibble_write(unsigned char data, unsigned char control);
+void LCD_command(unsigned char command);
+void LCD_data(unsigned char data);
+void LCD_init(void);
+
+int main(void)
+{
+    LCD_init();
+    for (;;)
+    {
+        LCD_command(1);         /* clear display */
+        delayMs(500);
+        LCD_command(0x85);      /* set cursor at first line */
+        LCD_data('h');          /* write the word 'hello'*/
+        LCD_data('e');
+        LCD_data('l');
+        LCD_data('l');
+        LCD_data('o');
+        delayMs(500);
+    }
+}
+
+void LCD_init(void)
+{
+    SIM->SCGC5 |= 0x400;       /* enable clock to Port B */
+    PORTB->PCR[2] = 0x100;      /* make PTB2 pin as GPIO */
+    PORTB->PCR[3] = 0x100;      /* make PTB3 pin as GPIO */
+    PORTB->PCR[8] = 0x100;      /* make PTB8 pin as GPIO */
+    PORTB->PCR[9] = 0x100;      /* make PTB9 pin as GPIO */
+    PORTB->PCR[10] = 0x100;      /* make PTB10 pin as GPIO */
+    PORTB->PCR[11] = 0x100;      /* make PTB11 pin as GPIO */
+    PTB->PDDR |= 0xF7;          /* make PTB2,3,8,9,10,11 as output pins */
+
+    delayMs(30);                /* initialization sequence */
+    LCD_nibble_write(0x30, 0);
+    delayMs(10);
+    LCD_nibble_write(0x30, 0);
+    delayMs(1);
+    LCD_nibble_write(0x30, 0);
+    delayMs(1);
+    LCD_nibble_write(0x20, 0);  /* use 4-bit data mode */
+    delayMs(1);
+
+    LCD_command(0x28);          /* set 4-bit data, 2-line, 5x7 font */
+    LCD_command(0x06);          /* move cursor right */
+    LCD_command(0x01);          /* clear screen, move cursor to home */
+    LCD_command(0x0F);          /* turn on display, cursor blinking */
+}
+
+void LCD_nibble_write(unsigned char data, unsigned char control)
+{
+    data &= 0xF0;       /* clear lower nibble for control */
+    control &= 0x0F;    /* clear upper nibble for data */
+    PTB->PDOR = data | control;       /* RS = 0, R/W = 0 */
+    PTB->PDOR = data | control | EN;  /* pulse E */
+    delayMs(0);
+    PTB->PDOR = data;
+    PTB->PDOR = 0;
+}
+
+void LCD_command(unsigned char command)
+{
+    LCD_nibble_write(command & 0xF0, 0);   /* upper nibble first */
+    LCD_nibble_write(command << 4, 0);     /* then lower nibble */
+
+    if (command < 4)
+        delayMs(4);         /* commands 1 and 2 need up to 1.64ms */
+    else
+        delayMs(1);         /* all others 40 us */
+}
+
+void LCD_data(unsigned char data)
+{
+    LCD_nibble_write(data & 0xF0, RS);    /* upper nibble first */
+    LCD_nibble_write(data << 4, RS);      /* then lower nibble  */
+
+    delayMs(1);
+}
+
+/* Delay n milliseconds
+ * The CPU core clock is set to MCGFLLCLK at 20.97 MHz in SystemInit().
+ */
+void delayMs(int n) 
+{
+    int i;
+    int j;
+    for (i = 0 ; i < n; i++)
+        for (j = 0 ; j < 3500; j++) {}
+}
