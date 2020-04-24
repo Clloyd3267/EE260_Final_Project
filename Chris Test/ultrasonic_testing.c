@@ -10,18 +10,20 @@ void LED_init(void);
 
 void US_TriggerTimerInit(void);
 void US_CaptureTimerInit(void);
-#define US_mod 44999  // 14999 // CDL=> What does this mean?
+#define US_mod 44999
 int US_index = 0;
-
-// CDL=> Why do these have to be volatile?
-volatile uint32_t US_cont[2];
-volatile uint32_t US_pulseWidth;
-volatile float US_distance;
+uint32_t US_cont[2];
+uint32_t US_pulseWidth;
+float US_distanceCM;
+float US_distanceInches;
+float US_distanceFeet;
 
 void UART0_init(void);
 void UART0Tx(char c);
 void UART0_puts(char* s);
 char UART0_buffer[30];
+
+void Buzzer_PWMTimerInit(void);
 
 // https://stackoverflow.com/questions/905928/using-floats-with-sprintf-in-embedded-c
 // CDL=> Debug code for UART print
@@ -29,9 +31,6 @@ int UART0_tmpInt1;
 float UART0_tmpFrac;
 int UART0_tmpInt2;
 
-void Buzzer_PWMTimerInit(void);
-void Buzzer_update(void);
-int Buzzer_index = 0;
 
 /*
  * This function is the main function of the project.
@@ -112,7 +111,7 @@ void US_TriggerTimerInit(void)
 
 /*
  * This function initializes the Ultrasonic Sensor Echo pin using the
- * TPM1_CH1 timer set in input compare mode using PTA13. CDL=> Explain more here.
+ * TPM1_CH1 timer set in input compare mode using PTA13.
  *
  * Arguments: None
  *
@@ -134,7 +133,7 @@ void US_CaptureTimerInit(void)
                               TPM_CnSC_ELSA_MASK;
 
     TPM1->MOD               = US_mod;               // Set up modulo register
-    TPM1->CONTROLS[1].CnV   = ((US_mod+1)/2) - 1;   // Set up 50% duty cycle    // CDL=> Explain this?
+    TPM1->CONTROLS[1].CnV   = ((US_mod+1)/2) - 1;   // Set up 50% duty cycle
     TPM1->SC               |= TPM_SC_PS(6);         // Prescaler of /2^6 = /64
     TPM1->SC               |= TPM_SC_TOF(1);        // Clear TOF
     TPM1->SC               |= TPM_SC_CMOD(1);       // Enable timer
@@ -168,27 +167,6 @@ void Buzzer_PWMTimerInit(void)
     TPM2->CONTROLS[0].CnV   = TPM2->MOD / 2;        // 50% duty cycle
     TPM2->SC               |= TPM_SC_PS(4);         // Prescaler of /2^4 = /16
     TPM2->SC               |= TPM_SC_TOF(1);        // Clear TOF
-    // TPM2->SC               |= TPM_SC_CMOD(1);       // Enable timer
-}
-
-/*
- * This function updates the frequency of the buzzer interface.
- *
- * Arguments: None
- *
- * Return: None (void)
- */
-void Buzzer_update(void)
-{
-    TPM2->SC             |= TPM_SC_CMOD(1);  // Enable timer
-    TPM2->MOD             = Buzzer_index;           // Set up modulo register
-    TPM2->CONTROLS[0].CnV = TPM2->MOD / 2;   // 50% duty cycle
-    
-    // Increment PWM max overflow value (period)
-    if (Buzzer_index == 6000)
-        Buzzer_index = 1000;
-    else
-        Buzzer_index += 200;  // CDL=> What value?
 }
 
 /*
@@ -204,12 +182,7 @@ void Buzzer_update(void)
  */
 void TPM1_IRQHandler(void)
 {
-    // CDL=> does this count as a polling loop?
-     // Wait for CHF flag to occur
-    while (!(TPM1->CONTROLS[1].CnSC & TPM_CnSC_CHF_MASK)) {}
-
-    // CDL=> Explain this block of code
-    // ******************************************
+    // Calculate pulse width
     US_cont[US_index % 2] = TPM1->CONTROLS[1].CnV;
 
     if ((US_index % 2) == 1)
@@ -222,13 +195,12 @@ void TPM1_IRQHandler(void)
         {
             US_pulseWidth = US_cont[1] - US_cont[0] + US_mod + 1;
         }
-    // ******************************************
 
         // Convert distance to cm
-        US_distance = (float)(US_pulseWidth * 2/3) * 0.0343;
+        US_distanceCM = (float)(US_pulseWidth * 2/3) * 0.0343;
 
         // Convert distance to inches
-        US_distance = (float)(US_distance / 2.54);
+        US_distanceInches = (float)(US_distanceCM / 2.54);
 
         // CDL=> Debug code for UART print
         // UART0_tmpInt1 = US_distance;
@@ -238,23 +210,29 @@ void TPM1_IRQHandler(void)
         // UART0_puts(UART0_buffer);
 
         // Convert distance to feet
-        US_distance = (float)(US_distance / 12);
+        US_distanceFeet = (float)(US_distanceInches / 12);
 
-        if (US_distance < (float)1.0)
+        if (US_distanceFeet < (float)1.0)
         {
             // Red LED on, Blue LED off, DC Motor off, Buzzer on
             PTB->PCOR = GPIO_PCOR_PTCO(0x40000);  // Turn on Red LED
             PTD->PSOR = GPIO_PSOR_PTSO(0x02);     // Turn off Blue LED
+            
+            // Setup 50% duty cycle with a specific period 1000-6000
+            TPM2->MOD = 1000 + 208 * US_distanceInches;
+            TPM2->CONTROLS[0].CnV = TPM2->MOD / 2;
             TPM2->SC |= TPM_SC_CMOD(1);           // Enable buzzer
-            Buzzer_update();
         }
-        else if (US_distance < (float)2.0)
+        else if (US_distanceFeet < (float)2.0)
         {
             // Blue LED on, Red LED off, Buzzer on
             PTD->PCOR = GPIO_PCOR_PTCO(0x02);     // Turn on Blue LED
             PTB->PSOR = GPIO_PSOR_PTSO(0x40000);  // Turn off Red LED
+
+            // Setup 50% duty cycle with a specific period 1000-6000
+            TPM2->MOD = 1000 + 208 * US_distanceInches;
+            TPM2->CONTROLS[0].CnV = TPM2->MOD / 2;
             TPM2->SC |= TPM_SC_CMOD(1);           // Enable buzzer
-            Buzzer_update();
         }
         else
         {
@@ -262,7 +240,6 @@ void TPM1_IRQHandler(void)
             PTD->PSOR = GPIO_PSOR_PTSO(0x02);     // Turn off Blue LED
             PTB->PSOR = GPIO_PSOR_PTSO(0x40000);  // Turn off Red LED
             TPM2->SC &= ~TPM_SC_CMOD(1);          // Disable buzzer
-            Buzzer_index == 6000;                 // Reset buzzer frequency
         }
     }
     US_index++;
