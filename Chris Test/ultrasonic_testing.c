@@ -1,6 +1,7 @@
 // PIN PTA12 = Trigger
 // PIN PTA13 = Echo
 
+// Includes
 #include <stdio.h>
 #include "board.h"
 #include "MKL25Z4.h"
@@ -9,21 +10,24 @@ void LED_init(void);
 
 void US_TriggerTimerInit(void);
 void US_CaptureTimerInit(void);
+#define US_mod 44999  // 14999 // CDL=> What does this mean?
+int US_index = 0;
+
+// CDL=> Why do these have to be volatile?
+volatile uint32_t US_cont[2];
 volatile uint32_t US_pulseWidth;
 volatile float US_distance;
-// https://stackoverflow.com/questions/905928/using-floats-with-sprintf-in-embedded-c
-int tmpInt1;
-float tmpFrac;
-int tmpInt2;
-volatile uint32_t US_cont[2];
-short int US_result;
-char US_buffer[30];
-int US_index = 0;
-#define US_mod 44999  // 14999
 
 void UART0_init(void);
 void UART0Tx(char c);
 void UART0_puts(char* s);
+char UART0_buffer[30];
+
+// https://stackoverflow.com/questions/905928/using-floats-with-sprintf-in-embedded-c
+// CDL=> Debug code for UART print
+int UART0_tmpInt1;
+float UART0_tmpFrac;
+int UART0_tmpInt2;
 
 /*
  * This function is the main function of the project.
@@ -38,19 +42,26 @@ int main(void)
     BOARD_InitBootClocks();  // Set system clock to 48 MHz internal clock
 
     // Initialize Interfaces
-    LED_init();
-    UART0_init();
-    __disable_irq();
-    US_TriggerTimerInit();
-    US_CaptureTimerInit();
-    __enable_irq();
+    LED_init();             // Init Blue and Red LEDs
+    UART0_init();           // Init UART0 interface
+    __disable_irq();        // Global disable IRQs (during setup)
+    US_TriggerTimerInit();  // Init trigger pin of ultrasonic sensor
+    US_CaptureTimerInit();  // Init echo pin of ultrasonic sensor
+    __enable_irq();         // Global enable IRQs (after setup)
 
-    sprintf(US_buffer, "\r\nUltrasonic Sensor Testing");
-    UART0_puts(US_buffer);
+    sprintf(UART0_buffer, "\r\nUltrasonic Sensor Testing");
+    UART0_puts(UART0_buffer);
 
-    while (1) {}
+    while (1) {}  // Main program execution loop
 }
 
+/*
+ * This function initializes the onboard Red (PTB18) and Blue (PTD1) LEDs.
+ *
+ * Arguments: None
+ *
+ * Return: None (void)
+ */
 void LED_init(void)
 {
     // Setup Blue LED
@@ -64,6 +75,15 @@ void LED_init(void)
     PTB->PDDR      |=  GPIO_PDDR_PDD(0x40000);  // Make PTB18 an output pin
 }
 
+/*
+ * This function initializes the Ultrasonic Sensor Trigger pin using the
+ * TPM1_CH0 timer to create a PWM signal with a period of ~60 ms and a pulse
+ * width of ~10 us. Outputs to sensor using PTA12.
+ *
+ * Arguments: None
+ *
+ * Return: None (void)
+ */
 void US_TriggerTimerInit(void)
 {
     SIM->SCGC5             |= SIM_SCGC5_PORTA(1);   // Enable clock to Port A
@@ -85,7 +105,14 @@ void US_TriggerTimerInit(void)
     TPM1->SC               |= TPM_SC_CMOD(1);       // Enable timer
 }
 
-
+/*
+ * This function initializes the Ultrasonic Sensor Echo pin using the
+ * TPM1_CH1 timer set in input compare mode using PTA13. CDL=> Explain more here.
+ *
+ * Arguments: None
+ *
+ * Return: None (void)
+ */
 void US_CaptureTimerInit(void)
 {
     SIM->SCGC5             |= SIM_SCGC5_PORTA(1);   // Enable clock to Port A
@@ -101,7 +128,7 @@ void US_CaptureTimerInit(void)
                               TPM_CnSC_ELSB_MASK |
                               TPM_CnSC_ELSA_MASK;
 
-    TPM1->CONTROLS[1].CnV   = ((US_mod+1)/2) - 1;   // Set up 50% dutycycle
+    TPM1->CONTROLS[1].CnV   = ((US_mod+1)/2) - 1;   // Set up 50% dutycycle  // CDL=>Explain this?
     TPM1->SC               |= TPM_SC_PS(6);         // Prescaler of /2^6 = /64
     TPM1->MOD               = US_mod;               // Set up modulo register
     TPM1->SC               |= TPM_SC_TOF(1);        // Clear TOF
@@ -109,12 +136,25 @@ void US_CaptureTimerInit(void)
     NVIC_EnableIRQ(TPM1_IRQn);                      // Enable IRQ18 (TPM1)
 }
 
-
-void TPM1_IRQHandler(void)  // CDL=> Comment this function
+/*
+ * This interrupt function is used to calculate the distance measured using an 
+ * ultrasonic sensor and turn on LEDs and a buzzer based on the distance 
+ * measured.
+ *
+ * Gets called (interrupts) when the TPM1_CH1 has a TOF (timer overflow flag).
+ *
+ * Arguments: None (void)
+ *
+ * Return: None (void)
+ */
+void TPM1_IRQHandler(void)
 {
     // CDL=> does this count as a polling loop?
-    while (!(TPM1->CONTROLS[1].CnSC & TPM_CnSC_CHF_MASK)) {} // Wait for CHF flag
+     // Wait for CHF flag to occur
+    while (!(TPM1->CONTROLS[1].CnSC & TPM_CnSC_CHF_MASK)) {}
 
+    // CDL=> Explain this block of code
+    // ******************************************
     US_cont[US_index % 2] = TPM1->CONTROLS[1].CnV;
 
     if ((US_index % 2) == 1)
@@ -127,29 +167,23 @@ void TPM1_IRQHandler(void)  // CDL=> Comment this function
         {
             US_pulseWidth = US_cont[1] - US_cont[0] + US_mod + 1;
         }
+    // ******************************************
 
-        // sprintf(US_buffer, "Pulse width %d \r\n", US_pulseWidth);
-        // UART0_puts(US_buffer);
+        // Convert distance to cm
+        US_distance = (float)(US_pulseWidth * 2/3) * 0.0343;
 
-        US_distance = (float)(US_pulseWidth * 2/3) * 0.0343;  // Convert to cm
+        // Convert distance to inches
+        US_distance = (float)(US_distance / 2.54);
 
-        // tmpInt1 = US_distance;
-        // tmpFrac = US_distance - tmpInt1;
-        // tmpInt2 = (tmpFrac * 10000);
+        // CDL=> Debug code for UART print
+        // UART0_tmpInt1 = US_distance;
+        // UART0_tmpFrac = US_distance - UART0_tmpInt1;
+        // UART0_tmpInt2 = (UART0_tmpFrac * 10000);
+        // sprintf(UART0_buffer, "Distance %d.%04d inches\r\n", UART0_tmpInt1, UART0_tmpInt2);
+        // UART0_puts(UART0_buffer);
 
-        // sprintf(US_buffer, "Distance %d.%04d cm\r\n", tmpInt1, tmpInt2);
-        // UART0_puts(US_buffer);
-
-        US_distance = (float)(US_distance / 2.54);  // Convert to inches
-
-        // tmpInt1 = US_distance;
-        // tmpFrac = US_distance - tmpInt1;
-        // tmpInt2 = (tmpFrac * 10000);
-
-        // sprintf(US_buffer, "Distance %d.%04d inches\r\n", tmpInt1, tmpInt2);
-        // UART0_puts(US_buffer);
-
-        US_distance = (float)(US_distance / 12);  // Convert to feet
+        // Convert distance to feet
+        US_distance = (float)(US_distance / 12);
 
         if (US_distance < (float)1.0)
         {
@@ -192,7 +226,7 @@ void UART0_init(void) {
 
 void UART0Tx(char c) {
     while(!(UART0->S1 & 0x80)) {
-    }   /* wait for transmit US_buffer empty */
+    }   /* wait for transmit UART0_buffer empty */
     UART0->D = c; /* send a char */
 }
 
