@@ -2,7 +2,6 @@
 // PIN PTA13 = Echo
 
 // Includes
-#include <stdio.h>
 #include "board.h"
 #include "MKL25Z4.h"
 
@@ -18,19 +17,7 @@ float US_distanceCM;
 float US_distanceInches;
 float US_distanceFeet;
 
-void UART0_init(void);
-void UART0Tx(char c);
-void UART0_puts(char* s);
-char UART0_buffer[30];
-
 void Buzzer_PWMTimerInit(void);
-
-// https://stackoverflow.com/questions/905928/using-floats-with-sprintf-in-embedded-c
-// CDL=> Debug code for UART print
-int UART0_tmpInt1;
-float UART0_tmpFrac;
-int UART0_tmpInt2;
-
 
 /*
  * This function is the main function of the project.
@@ -46,15 +33,11 @@ int main(void)
 
     // Initialize Interfaces
     LED_init();             // Init Blue and Red LEDs
-    UART0_init();           // Init UART0 interface
     __disable_irq();        // Global disable IRQs (during setup)
     Buzzer_PWMTimerInit();  // Init buzzer TPM timer
     US_TriggerTimerInit();  // Init trigger pin of ultrasonic sensor
     US_CaptureTimerInit();  // Init echo pin of ultrasonic sensor
     __enable_irq();         // Global enable IRQs (after setup)
-
-    sprintf(UART0_buffer, "\r\nUltrasonic Sensor Testing");
-    UART0_puts(UART0_buffer);
 
     while (1) {}  // Main program execution loop
 }
@@ -174,7 +157,7 @@ void Buzzer_PWMTimerInit(void)
  * ultrasonic sensor and turn on LEDs and a buzzer based on the distance
  * measured.
  *
- * Gets called (interrupts) when the TPM1_CH1 has a TOF (timer overflow flag).
+ * Gets called (interrupts) when the TPM1_CH1 has a CHF (count hit flag).
  *
  * Arguments: None (void)
  *
@@ -201,13 +184,6 @@ void TPM1_IRQHandler(void)
 
         // Convert distance to inches
         US_distanceInches = (float)(US_distanceCM / 2.54);
-
-        // CDL=> Debug code for UART print
-        // UART0_tmpInt1 = US_distance;
-        // UART0_tmpFrac = US_distance - UART0_tmpInt1;
-        // UART0_tmpInt2 = (UART0_tmpFrac * 10000);
-        // sprintf(UART0_buffer, "Distance %d.%04d inches\r\n", UART0_tmpInt1, UART0_tmpInt2);
-        // UART0_puts(UART0_buffer);
 
         // Convert distance to feet
         US_distanceFeet = (float)(US_distanceInches / 12);
@@ -244,31 +220,4 @@ void TPM1_IRQHandler(void)
     }
     US_index++;
     TPM1->CONTROLS[1].CnSC |= TPM_CnSC_CHF(1);    // Clear CHF
-}
-
-// Old UART0
-void UART0_init(void) {
-    SIM->SCGC4 |= 0x0400;    /* enable clock for UART0 */
-    SIM->SOPT2 |= 0x04000000;    /* use FLL output for UART Baud rate generator */
-    UART0->C2   = 0;          /* turn off UART0 while changing configurations */
-    UART0->BDH  = 0x00;
-    UART0->BDL  = 0x1A;      /* 115200 Baud with 48 MHz*/
-    UART0->C4   = 0x0F;       /* Over Sampling Ratio 16 */
-    UART0->C1   = 0x00;       /* 8-bit data */
-    UART0->C2   = 0x08;       /* enable transmit */
-
-    SIM->SCGC5   |= 0x0200;    /* enable clock for PORTA */
-    PORTA->PCR[2] = 0x0200; /* make PTA2 UART0_Tx pin */
-}
-
-
-void UART0Tx(char c) {
-    while(!(UART0->S1 & 0x80)) {
-    }   /* wait for transmit UART0_buffer empty */
-    UART0->D = c; /* send a char */
-}
-
-void UART0_puts(char* s) {
-    while (*s != 0)         /* if not end of string */
-        UART0Tx(*s++);      /* send the character through UART0 */
 }
