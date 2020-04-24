@@ -29,6 +29,10 @@ int UART0_tmpInt1;
 float UART0_tmpFrac;
 int UART0_tmpInt2;
 
+void Buzzer_PWMTimerInit(void);
+void Buzzer_update(void);
+int Buzzer_index = 0;
+
 /*
  * This function is the main function of the project.
  *
@@ -37,7 +41,7 @@ int UART0_tmpInt2;
  * Return:
  * - (int): Integer status of function exit. (0 -> good, anything else -> error)
  */
-int main(void) 
+int main(void)
 {
     BOARD_InitBootClocks();  // Set system clock to 48 MHz internal clock
 
@@ -45,6 +49,7 @@ int main(void)
     LED_init();             // Init Blue and Red LEDs
     UART0_init();           // Init UART0 interface
     __disable_irq();        // Global disable IRQs (during setup)
+    Buzzer_PWMTimerInit();  // Init buzzer TPM timer
     US_TriggerTimerInit();  // Init trigger pin of ultrasonic sensor
     US_CaptureTimerInit();  // Init echo pin of ultrasonic sensor
     __enable_irq();         // Global enable IRQs (after setup)
@@ -128,17 +133,67 @@ void US_CaptureTimerInit(void)
                               TPM_CnSC_ELSB_MASK |
                               TPM_CnSC_ELSA_MASK;
 
-    TPM1->CONTROLS[1].CnV   = ((US_mod+1)/2) - 1;   // Set up 50% dutycycle  // CDL=>Explain this?
-    TPM1->SC               |= TPM_SC_PS(6);         // Prescaler of /2^6 = /64
     TPM1->MOD               = US_mod;               // Set up modulo register
+    TPM1->CONTROLS[1].CnV   = ((US_mod+1)/2) - 1;   // Set up 50% duty cycle    // CDL=> Explain this?
+    TPM1->SC               |= TPM_SC_PS(6);         // Prescaler of /2^6 = /64
     TPM1->SC               |= TPM_SC_TOF(1);        // Clear TOF
     TPM1->SC               |= TPM_SC_CMOD(1);       // Enable timer
     NVIC_EnableIRQ(TPM1_IRQn);                      // Enable IRQ18 (TPM1)
 }
 
 /*
- * This interrupt function is used to calculate the distance measured using an 
- * ultrasonic sensor and turn on LEDs and a buzzer based on the distance 
+ * This function initializes the buzzer interface using the TPM2_CH0 timer to
+ * create a PWM signal to PTE22 with a frequency which varies from 500 Hz to
+ * 3 KHz.
+ *
+ * Arguments: None
+ *
+ * Return: None (void)
+ */
+void Buzzer_PWMTimerInit(void)
+{
+    SIM->SCGC5             |= SIM_SCGC5_PORTE(1);   // Enable clock to Port E
+    SIM->SCGC6             |= SIM_SCGC6_TPM2(1);    // Enable clock to TPM2
+    SIM->SOPT2             |= SIM_SOPT2_TPMSRC(1);  // Use MCGFLLCLK clock
+    PORTE->PCR[22]         |= PORT_PCR_MUX(3);      // PTE22 used by TPM2_CH0
+
+    TPM2->SC                = 0;                    // Disable timer
+    TPM2->CONTROLS[0].CnSC  = TPM_CnSC_CHF(1);      // Clear CHF for Channel 0
+
+    // Enable TPM2_CH0 as edge-aligned PWM
+    TPM2->CONTROLS[0].CnSC |= TPM_CnSC_MSB_MASK  |
+                              TPM_CnSC_ELSB_MASK;
+
+    TPM2->MOD               = 6000;                 // Set up modulo register
+    TPM2->CONTROLS[0].CnV   = TPM2->MOD / 2;        // 50% duty cycle
+    TPM2->SC               |= TPM_SC_PS(4);         // Prescaler of /2^4 = /16
+    TPM2->SC               |= TPM_SC_TOF(1);        // Clear TOF
+    // TPM2->SC               |= TPM_SC_CMOD(1);       // Enable timer
+}
+
+/*
+ * This function updates the frequency of the buzzer interface.
+ *
+ * Arguments: None
+ *
+ * Return: None (void)
+ */
+void Buzzer_update(void)
+{
+    TPM2->SC             |= TPM_SC_CMOD(1);  // Enable timer
+    TPM2->MOD             = Buzzer_index;           // Set up modulo register
+    TPM2->CONTROLS[0].CnV = TPM2->MOD / 2;   // 50% duty cycle
+    
+    // Increment PWM max overflow value (period)
+    if (Buzzer_index == 6000)
+        Buzzer_index = 1000;
+    else
+        Buzzer_index += 200;  // CDL=> What value?
+}
+
+/*
+ * This interrupt function is used to calculate the distance measured using an
+ * ultrasonic sensor and turn on LEDs and a buzzer based on the distance
  * measured.
  *
  * Gets called (interrupts) when the TPM1_CH1 has a TOF (timer overflow flag).
@@ -190,18 +245,24 @@ void TPM1_IRQHandler(void)
             // Red LED on, Blue LED off, DC Motor off, Buzzer on
             PTB->PCOR = GPIO_PCOR_PTCO(0x40000);  // Turn on Red LED
             PTD->PSOR = GPIO_PSOR_PTSO(0x02);     // Turn off Blue LED
+            TPM2->SC |= TPM_SC_CMOD(1);           // Enable buzzer
+            Buzzer_update();
         }
         else if (US_distance < (float)2.0)
         {
             // Blue LED on, Red LED off, Buzzer on
             PTD->PCOR = GPIO_PCOR_PTCO(0x02);     // Turn on Blue LED
             PTB->PSOR = GPIO_PSOR_PTSO(0x40000);  // Turn off Red LED
+            TPM2->SC |= TPM_SC_CMOD(1);           // Enable buzzer
+            Buzzer_update();
         }
         else
         {
             // All LED's off
             PTD->PSOR = GPIO_PSOR_PTSO(0x02);     // Turn off Blue LED
             PTB->PSOR = GPIO_PSOR_PTSO(0x40000);  // Turn off Red LED
+            TPM2->SC &= ~TPM_SC_CMOD(1);          // Disable buzzer
+            Buzzer_index == 6000;                 // Reset buzzer frequency
         }
     }
     US_index++;
