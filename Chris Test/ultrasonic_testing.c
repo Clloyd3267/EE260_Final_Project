@@ -1,58 +1,67 @@
-// PIN PTQ = Trigger
-// PIN PTE23 = echo
+// PIN PTA12 = Trigger
+// PIN PTA13 = Echo
+
 #include <stdio.h>
 #include "board.h"
-// #include "peripherals.h"
-// #include "pin_mux.h"
-// #include "clock_config.h"
 #include "MKL25Z4.h"
-// #include "fsl_debug_console.h"
+
+void LED_init(void);
 
 void US_TriggerTimerInit(void);
 void US_CaptureTimerInit(void);
-void UART0_init(void);
-void UART0Tx(char c);
-void UART0_puts(char* s);
-
-
 volatile uint32_t US_pulseWidth;
 volatile float US_distance;
 // https://stackoverflow.com/questions/905928/using-floats-with-sprintf-in-embedded-c
 int tmpInt1;
 float tmpFrac;
 int tmpInt2;
-
 volatile uint32_t US_cont[2];
 short int US_result;
 char US_buffer[30];
-
 int US_index = 0;
 #define US_mod 44999  // 14999
 
+void UART0_init(void);
+void UART0Tx(char c);
+void UART0_puts(char* s);
+
 /*
- * @brief   Application entry point.
+ * This function is the main function of the project.
+ *
+ * Arguments: None
+ *
+ * Return:
+ * - (int): Integer status of function exit. (0 -> good, anything else -> error)
  */
-int main(void) {
+int main(void) 
+{
+    BOARD_InitBootClocks();  // Set system clock to 48 MHz internal clock
 
-    /* Init board hardware. */
-    BOARD_InitBootClocks();
+    // Initialize Interfaces
+    LED_init();
+    UART0_init();
+    __disable_irq();
+    US_TriggerTimerInit();
+    US_CaptureTimerInit();
+    __enable_irq();
 
-    SIM->SCGC5 |= 0x400;        /* enable clock to Port B */
-    PORTB->PCR[18] = 0x100;     /* make PTB18 pin as GPIO */
-    PTB->PSOR |= 0x40000;       /* Set PTB18 to turn off red LED */
-    PTB->PDDR |= 0x40000;       /* make PTB18 as output pin */
-
-    UART0_init();                               /* initialize UART0 for output */
-    sprintf(US_buffer, "\r\nUltrasonic sensor Testing");   /* convert to string */
+    sprintf(US_buffer, "\r\nUltrasonic Sensor Testing");
     UART0_puts(US_buffer);
 
-    __disable_irq();                            /* global disable IRQs */
-    US_TriggerTimerInit();                      /* Configure PWM */
-    US_CaptureTimerInit();
-    __enable_irq();                             /* global enable IRQs */
+    while (1) {}
+}
 
-    while (1) {
-    }
+void LED_init(void)
+{
+    // Setup Blue LED
+    SIM->SCGC5    |=  SIM_SCGC5_PORTD(1);       // Enable clock to Port D
+    PORTD->PCR[1] |=  PORT_PCR_MUX(1);          // Make PTD1 pin as GPIO
+    PTD->PDDR     |=  GPIO_PDDR_PDD(0x02);      // Make PTD1 an output pin
+
+    // Setup Red LED
+    SIM->SCGC5     |=  SIM_SCGC5_PORTB(1);      // Enable clock to Port B
+    PORTB->PCR[18] |=  PORT_PCR_MUX(1);         // Make PTB18 pin as GPIO
+    PTB->PDDR      |=  GPIO_PDDR_PDD(0x40000);  // Make PTB18 an output pin
 }
 
 void US_TriggerTimerInit(void)
@@ -132,7 +141,7 @@ void TPM1_IRQHandler(void)  // CDL=> Comment this function
         // UART0_puts(US_buffer);
 
         US_distance = (float)(US_distance / 2.54);  // Convert to inches
-        
+
         // tmpInt1 = US_distance;
         // tmpFrac = US_distance - tmpInt1;
         // tmpInt2 = (tmpFrac * 10000);
@@ -140,33 +149,32 @@ void TPM1_IRQHandler(void)  // CDL=> Comment this function
         // sprintf(US_buffer, "Distance %d.%04d inches\r\n", tmpInt1, tmpInt2);
         // UART0_puts(US_buffer);
 
-        // CDL=> Remove later
-        if (distance < (float)6.0)
-            PTB->PCOR |= 0x40000;       /* Clear PTB18 to turn on red LED */
-        else
-            PTB->PSOR |= 0x40000;       /* Set PTB18 to turn off red LED */
-
         US_distance = (float)(US_distance / 12);  // Convert to feet
 
         if (US_distance < (float)1.0)
         {
             // Red LED on, Blue LED off, DC Motor off, Buzzer on
+            PTB->PCOR = GPIO_PCOR_PTCO(0x40000);  // Turn on Red LED
+            PTD->PSOR = GPIO_PSOR_PTSO(0x02);     // Turn off Blue LED
         }
         else if (US_distance < (float)2.0)
         {
             // Blue LED on, Red LED off, Buzzer on
+            PTD->PCOR = GPIO_PCOR_PTCO(0x02);     // Turn on Blue LED
+            PTB->PSOR = GPIO_PSOR_PTSO(0x40000);  // Turn off Red LED
         }
         else
         {
             // All LED's off
+            PTD->PSOR = GPIO_PSOR_PTSO(0x02);     // Turn off Blue LED
+            PTB->PSOR = GPIO_PSOR_PTSO(0x40000);  // Turn off Red LED
         }
     }
     US_index++;
-    TPM1->CONTROLS[1].CnSC |= TPM_CnSC_CHF(1);    /* clear CHF */
+    TPM1->CONTROLS[1].CnSC |= TPM_CnSC_CHF(1);    // Clear CHF
 }
 
-
-/* initialize UART0 to transmit at 115200 Baud */
+// Old UART0
 void UART0_init(void) {
     SIM->SCGC4 |= 0x0400;    /* enable clock for UART0 */
     SIM->SOPT2 |= 0x04000000;    /* use FLL output for UART Baud rate generator */
