@@ -12,6 +12,19 @@
 #include "board.h"
 #include "MKL25Z4.h"
 
+// An enum to define the operating modes (states) of the program // CDL=> Explain each mode here and in description
+typedef enum
+{
+    MODE_1_ANALOG_SERVO_POS   = 0x1,
+    MODE_2_ANALOG_MOTOR_SPEED = 0x2,
+    MODE_3_SER_SERVO_SCAN     = 0x3,
+    MODE_4_SER_SERVO_POS      = 0x4,
+    MODE_5_SER_MOTOR_SPEED    = 0x5
+} modes;
+#define DEFAULT_MODE MODE_1_ANALOG_SERVO_POS
+modes currentMode = DEFAULT_MODE;
+char* modeToString(modes mode);
+
 // Keypad (KP_ prefix) related functionality
 void KP_init(void);
 char KP_getkey(void);
@@ -52,6 +65,25 @@ int main(void)
 
     while (1) {}            // Empty main control loop to demonstrate that the
                             // program can operate with just interrupts
+}
+
+char* modeToString(modes mode)
+{
+    switch (mode)
+    {
+        case MODE_1_ANALOG_SERVO_POS:
+            return "MODE_1_ANALOG_SERVO_POS";
+        case MODE_2_ANALOG_MOTOR_SPEED:
+            return "MODE_2_ANALOG_MOTOR_SPEED";
+        case MODE_3_SER_SERVO_SCAN:
+            return "MODE_3_SER_SERVO_SCAN";
+        case MODE_4_SER_SERVO_POS:
+            return "MODE_4_SER_SERVO_POS";
+        case MODE_5_SER_MOTOR_SPEED:
+            return "MODE_5_SER_MOTOR_SPEED";
+        default:
+            return "ERROR: Invalid Mode!!!";
+    }
 }
 
 /*
@@ -107,15 +139,22 @@ void PORTD_IRQHandler(void)
     char keyChar;       // Character representation of value of key press
 
     key = KP_getkey();  // Get pressed key from keypad
-    if (key != 0x0)     // Ensure key was not released too soon
+    if ((key != 0x0) && (key != currentMode))     // Ensure key was not released too soon
     {
+        // Change to state described by key
+        currentMode = key;
+
         // Get character representation of key
         keyChar = KP_KeyChars[key];
 
-        // Output the most recent key press char to UART0
-        UART0_TransmitPoll(keyChar);
+        UART0_putString(modeToString(currentMode));
         UART0_TransmitPoll('\r');
         UART0_TransmitPoll('\n');
+
+        // Output the most recent key press char to UART0
+        // UART0_TransmitPoll(keyChar);
+        // UART0_TransmitPoll('\r');
+        // UART0_TransmitPoll('\n');
     }
     PORTD->ISFR = PORT_ISFR_ISF(0x38);  // Clear interrupt flags
 }
