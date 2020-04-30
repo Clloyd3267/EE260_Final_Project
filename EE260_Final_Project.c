@@ -15,15 +15,16 @@
 // An enum to define the operating modes (states) of the program // CDL=> Explain each mode here and in description
 typedef enum
 {
-    MODE_1_ANALOG_SERVO_POS   = 0x1,
-    MODE_2_ANALOG_MOTOR_SPEED = 0x2,
-    MODE_3_SER_SERVO_SCAN     = 0x3,
-    MODE_4_SER_SERVO_POS      = 0x4,
-    MODE_5_SER_MOTOR_SPEED    = 0x5
+    MODE_1_ANALOG_SERVO_POS = 0x1,
+    MODE_2_ANALOG_MTR_SPD   = 0x2,
+    MODE_3_SER_SERVO_SCAN   = 0x3,
+    MODE_4_SER_SERVO_POS    = 0x4,
+    MODE_5_SER_MOTOR_SPD    = 0x5
 } modes;
 #define DEFAULT_MODE MODE_1_ANALOG_SERVO_POS
 modes currentMode = DEFAULT_MODE;
 char* modeToString(modes mode);
+char* getModeName(modes mode);
 
 // Keypad (KP_ prefix) related functionality
 void KP_init(void);
@@ -35,7 +36,19 @@ char KP_KeyChars[] = {'0', '1', '2', '3', '4', '5'};
 #define UART0_OVER_SAMPLE 15
 void UART0_init(void);
 void UART0_TransmitPoll(char data);
-void UART0_putString(char* string);
+void UART0_print(char* string);
+void UART0_println(char* string);
+
+// LCD Display (LCD_ prefix) related functionality
+void LCD_init(void);
+void LCD_nibble_write(unsigned char data, unsigned char control);
+void LCD_command(unsigned char command);
+void LCD_data(unsigned char data);
+void LCD_print(char* string);
+#define LCD_EN 8  // BIT2 mask
+#define LCD_RS 4  // BIT0 mask
+#define LCD_RS_SETTINGS 0
+#define LCD_RS_DATA 1
 
 // Other Functions
 #define SYSTEM_CLOCK 48000000  // 48 MHz system clock
@@ -56,33 +69,65 @@ int main(void)
     BOARD_InitBootClocks();  // Set system clock to 48 MHz internal clock
 
     // Initialize Interfaces
-    __disable_irq();        // Global disable IRQs (during setup)
-    KP_init();              // Initialize the keypad interface
-    UART0_init();           // Initialize the UART0 interface
-    __enable_irq();         // Global enable IRQs (after setup)
+    LCD_init();
+    __disable_irq();         // Global disable IRQs (during setup)
+    KP_init();               // Initialize the keypad interface
+    UART0_init();            // Initialize the UART0 interface
+    __enable_irq();          // Global enable IRQs (after setup)
 
-    UART0_putString("Hello World!\r\n");
+    UART0_println("Hello World!");
+    LCD_print("Hello World!");
 
-    while (1) {}            // Empty main control loop to demonstrate that the
-                            // program can operate with just interrupts
+    // Empty main control loop to demonstrate that the program can operate
+    // with just interrupts
+    while (1) {}
 }
 
-char* modeToString(modes mode)
+// char* modeToString(modes mode) // CDL=> Remove later. Debug only!
+// {
+//     switch (mode)
+//     {
+//         case MODE_1_ANALOG_SERVO_POS:
+//             return "MODE_1_ANALOG_SERVO_POS";
+//         case MODE_2_ANALOG_MTR_SPD:
+//             return "MODE_2_ANALOG_MTR_SPD";
+//         case MODE_3_SER_SERVO_SCAN:
+//             return "MODE_3_SER_SERVO_SCAN";
+//         case MODE_4_SER_SERVO_POS:
+//             return "MODE_4_SER_SERVO_POS";
+//         case MODE_5_SER_MOTOR_SPD:
+//             return "MODE_5_SER_MOTOR_SPD";
+//         default:
+//             return "ERROR: Invalid Mode!!!";
+//     }
+// }
+
+/*
+ * This function returns a character array (cstring) representation of a (mode).
+ *
+ * Arguments: 
+ * - mode (enum modes): The mode to convert to string.
+ * 
+ * Return:
+ *
+ * - (char*): A character array (cstring) representation of a (mode).
+ */
+char* getModeName(modes mode)
 {
     switch (mode)
     {
         case MODE_1_ANALOG_SERVO_POS:
-            return "MODE_1_ANALOG_SERVO_POS";
-        case MODE_2_ANALOG_MOTOR_SPEED:
-            return "MODE_2_ANALOG_MOTOR_SPEED";
+            return "ANALOG_SERVO_POS";
+        case MODE_2_ANALOG_MTR_SPD:
+            return "ANALOG_MTR_SPD";
         case MODE_3_SER_SERVO_SCAN:
-            return "MODE_3_SER_SERVO_SCAN";
+            return "SER_SERVO_SCAN";
         case MODE_4_SER_SERVO_POS:
-            return "MODE_4_SER_SERVO_POS";
-        case MODE_5_SER_MOTOR_SPEED:
-            return "MODE_5_SER_MOTOR_SPEED";
+            return "SER_SERVO_POS";
+        case MODE_5_SER_MOTOR_SPD:
+            return "SER_MOTOR_SPD";
         default:
-            return "ERROR: Invalid Mode!!!";
+            return "Invalid Mode!!!";
     }
 }
 
@@ -99,8 +144,8 @@ void KP_init(void)
     SIM->SCGC5    |= SIM_SCGC5_PORTD(1);   // Enable clock to Port D
 
     // Row 1 and 2 as GPIO with enabled pullups
-    PORTD->PCR[0] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);  // Row 1
-    PORTD->PCR[2] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);  // Row 2
+    PORTD->PCR[0] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1); // Row 1
+    PORTD->PCR[2] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1); // Row 2
 
     // Col 1 as GPIO with enabled pullups and falling edge interrupt
     PORTD->PCR[3] |= PORT_PCR_MUX(1) | PORT_PCR_PE(1) | PORT_PCR_PS(1);
@@ -139,7 +184,9 @@ void PORTD_IRQHandler(void)
     char keyChar;       // Character representation of value of key press
 
     key = KP_getkey();  // Get pressed key from keypad
-    if ((key != 0x0) && (key != currentMode))     // Ensure key was not released too soon
+    
+    // Ensure key was not released too soon
+    if ((key != 0x0) && (key != currentMode))
     {
         // Change to state described by key
         currentMode = key;
@@ -147,31 +194,14 @@ void PORTD_IRQHandler(void)
         // Get character representation of key
         keyChar = KP_KeyChars[key];
 
-        UART0_putString(modeToString(currentMode));
-        UART0_TransmitPoll('\r');
-        UART0_TransmitPoll('\n');
-
-        // Output the most recent key press char to UART0
-        // UART0_TransmitPoll(keyChar);
-        // UART0_TransmitPoll('\r');
-        // UART0_TransmitPoll('\n');
+        LCD_print(getModeName(currentMode));
+        UART0_print(getModeName(currentMode));
     }
     PORTD->ISFR = PORT_ISFR_ISF(0x38);  // Clear interrupt flags
 }
 
 /*
  * This non-blocking function checks what key was pressed assuming one was.
- * To check if a key was pressed, use "boolean KP_keyPressed()".
- *
- * The upper nibble of Port C is used as input. Pull-ups are enabled such that
- * when the keys are not pressed, these pins are pull up high.
- * The lower nibble of Port C is used as output that drives the keypad rows.
- * If any key is pressed, the program drives one row low at a time and
- * leave the rest of the rows inactive (float) then read the input pins.
- * Knowing which row is active and which column is active, the program
- * can decide which key is pressed.
- *
- * Note: To get the actual hex value of pressed key, use "uint8_t KP_hexKey[]".
  *
  * Arguments: None
  *
@@ -257,7 +287,7 @@ void UART0_init(void)
  */
 void UART0_TransmitPoll(char data)
 {
-    // Wait until transmit register is empty
+    // Wait until transmit register is empty  // CDL=> Use interrupts?
     while (!(UART0->S1 & UART_S1_TDRE_MASK));
 
     // Send data
@@ -265,20 +295,42 @@ void UART0_TransmitPoll(char data)
 }
 
 /*
- * This function sends a cstring (with '\0' at end).
+ * This function sends a cstring (with '\0' at end) to the UART0.
+ *
+ * Note: This function does not send a linebreak "\r\n"!
  *
  * Arguments:
  * - s: The cstring (char*) to send.
  *
  * Return: None (void)
  */
-void UART0_putString(char* string)
+void UART0_print(char* string)
 {
     while (*string != 0)                // While not at end of cstring
     {
         UART0_TransmitPoll(*string++);  // Send the character through UART0
     }
 }
+
+/*
+ * This function sends a cstring (with '\0' at end) to the UART0.
+ *
+ * Note: This function does send a linebreak "\r\n"!
+ *
+ * Arguments:
+ * - s: The cstring (char*) to send.
+ *
+ * Return: None (void)
+ */
+void UART0_println(char* string)
+{
+    UART0_print(string);
+
+    // Add Linebreak
+    UART0_TransmitPoll('\r');
+    UART0_TransmitPoll('\n');
+}
+
 /*
  * This interrupt function gets a character from the UART0 receive buffer.
  *
@@ -291,10 +343,121 @@ void UART0_putString(char* string)
  */
 void UART0_IRQHandler(void)
 {
+    // CDL=> Add transmit interrupts?
     // CDL=> Come back here later
     char c;
     c = UART0->D;
     UART0_TransmitPoll(c);
+}
+
+/*
+ * This function initializes PortB for the LCD and sets up the interface.
+ *
+ * Arguments: None
+ *
+ * Return: None (void)
+ */
+void LCD_init(void)
+{
+    // Setup Interface pins
+    SIM->SCGC5    |= SIM_SCGC5_PORTB(1);    // Enable clock to Port B
+    PORTB->PCR[2]  = PORT_PCR_MUX(1);       // Make PTB2 pin as GPIO  (RS)
+    PORTB->PCR[3]  = PORT_PCR_MUX(1);       // Make PTB3 pin as GPIO  (EN)
+    PORTB->PCR[8]  = PORT_PCR_MUX(1);       // Make PTB8 pin as GPIO  (DB4)
+    PORTB->PCR[9]  = PORT_PCR_MUX(1);       // Make PTB9 pin as GPIO  (DB5)
+    PORTB->PCR[10] = PORT_PCR_MUX(1);       // Make PTB10 pin as GPIO (DB6)
+    PORTB->PCR[11] = PORT_PCR_MUX(1);       // Make PTB11 pin as GPIO (DB7)
+    PTB->PDDR     |= GPIO_PDDR_PDD(0xF0C);  // Make PTB11-8, 2, 3 as output pins
+
+    // Setup LCD device
+    delayMs(30);                            // Initialization sequence
+    LCD_nibble_write(0x03, LCD_RS_SETTINGS);
+    delayMs(10);
+    LCD_nibble_write(0x03, LCD_RS_SETTINGS);
+    delayMs(1);
+    LCD_nibble_write(0x03, LCD_RS_SETTINGS);
+    delayMs(1);
+    LCD_nibble_write(0x02, LCD_RS_SETTINGS);            // Use 4-bit data mode
+    delayMs(1);
+
+    LCD_command(0x28);                     // Set 4-bit data, 2-line, 5x7 font
+    LCD_command(0x06);                     // Move cursor right
+    LCD_command(0x01);                     // Clear screen, move cursor to home
+    LCD_command(0x0F);                     // Turn on display, cursor blinking
+}
+
+/*
+ * This function writes a nibble of data to the LCD.
+ *
+ * Arguments:
+ * - data: The data nibble to send.
+ * - control: The control digits to send.
+ *
+ * Return: None (void)
+ */
+void LCD_nibble_write(unsigned char data, unsigned char control)
+{
+    data     &= 0x0F;                           // Validate input data
+    control   = (control << 2) & LCD_RS;        // Validate input control
+    PTB->PDOR = (data << 8) | control;          // Write data without enable bit
+    PTB->PDOR = (data << 8) | control | LCD_EN; // Write data with enable bit
+    delayUs(1);
+    PTB->PDOR = (data << 8) | control;          // Write data without enable bit
+    PTB->PDOR = 0;                              // Remove nibble of data
+}
+
+/*
+ * This function writes a command to the LCD. (RS=0)
+ *
+ * Arguments:
+ * - command: The command to send.
+ *
+ * Return: None (void)
+ */
+void LCD_command(unsigned char command)
+{
+    LCD_nibble_write((command >> 4) & 0x0F, LCD_RS_SETTINGS);  // Upper nibble first
+    LCD_nibble_write(command & 0x0F, LCD_RS_SETTINGS);    // Then lower nibble
+
+    if (command < 4)
+        delayMs(4);  // Commands 1 and 2 need up to 1.64 ms
+    else
+        delayMs(1);  // All others take only 40 us
+}
+
+/*
+ * This function writes data to the LCD. (RS=1)
+ *
+ * Arguments:
+ * - command: The command to send.
+ *
+ * Return: None (void)
+ */
+void LCD_data(unsigned char data)
+{
+    LCD_nibble_write((data >> 4) & 0x0F, LCD_RS_DATA);  // Upper nibble first
+    LCD_nibble_write(data & 0x0F, LCD_RS_DATA);    // Then lower nibble
+    delayMs(1);
+}
+
+/*
+ * This function sends a cstring (with '\0' at end) to the LCD.
+ *
+ * Note: This function does not send a linebreak "\r\n"!
+ *
+ * Arguments:
+ * - s: The cstring (char*) to send.
+ *
+ * Return: None (void)
+ */
+void LCD_print(char* string)
+{
+    LCD_command(0x01);        // Clear display and set cursor to first line
+
+    while (*string != 0)      // While not at end of cstring
+    {
+        LCD_data(*string++);  // Print Character
+    }
 }
 
 /*

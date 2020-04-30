@@ -18,7 +18,9 @@ int main (void) {
 }
 
 /* UART0 interrupt handler */
-void UART0_IRQHandler(void) {
+void UART0_IRQHandler(void) 
+{
+
     char c;
     c = UART0->D;           /* read the char received */
     LED_set(c);
@@ -38,7 +40,7 @@ void UART0_init(void) {
 
     UART0->C4 = UART0_C4_OSR(15);		//0x0F       		/* Over Sampling Ratio 16 */
     UART0->C1 = UART0_C1_M(0);			//0x00;       		/* 8-bit data */
-    UART0->C2 = UART0_C2_TE(1)|UART0_C2_RE(1)|UART0_C2_TIE(1);	//0x2C;       		/* enable receive, transmit and receive interrupt*/
+    UART0->C2 = UART0_C2_TE(1)|UART0_C2_RE(1)|UART0_C2_RIE(1);	//0x2C;       		/* enable receive, transmit and receive interrupt*/
 
     NVIC->ISER[0] |= 0x00001000;    /* enable INT12 (bit 12 of ISER[0]) */
 
@@ -48,17 +50,14 @@ void UART0_init(void) {
 }
 
 void LED_init(void){
-	SIM->SCGC5 |= 0x400;
-	SIM->SCGC5 |= 0x1000;
-	PORTB->PCR[18] = 0x100;
-	PTB->PDDR |= 0X40000;
-	PTB->PSOR |= 0x40000;
-	PORTB->PCR[19] = 0x100;
-	PTB->PDDR |= 0x80000;
-	PTB->PSOR |= 0x80000;
-	PORTD->PCR[1] = 0x100;
-	PTD->PDDR |= 0x02;
-	PTD->PSOR |= 0x02;
+    SIM->SCGC5    |= 0x400;    // Enable clock to Port B
+    SIM->SCGC5    |= 0x1000;   // Enable clock to Port D
+    PORTB->PCR[18] = 0x100;    // Make PTB18 pin as GPIO
+    PTB->PDDR     |= 0x40000;  // Make PTB18 as output pin
+    PORTB->PCR[19] = 0x100;    // Make PTB19 pin as GPIO
+    PTB->PDDR     |= 0x80000;  // Make PTB19 as output pin
+    PORTD->PCR[1]  = 0x100;    // Make PTD1 pin as GPIO
+    PTD->PDDR     |= 0x02;     // Make PTD1 as output pin
 }
 
 void LED_set(char value){
