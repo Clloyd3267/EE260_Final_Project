@@ -39,6 +39,11 @@ void UART0_TransmitPoll(char data);
 void UART0_print(char* string);
 void UART0_println(char* string);
 
+// UART0 Receive buffer
+#define UART0_RECEIVE_BUFFER_MAX_LENGTH 100
+char UART0_receiveBuffer [UART0_RECEIVE_BUFFER_MAX_LENGTH];
+uint8_t UART0_receiveCounter = 0;
+
 // LCD Display (LCD_ prefix) related functionality
 void LCD_init(void);
 void LCD_nibble_write(unsigned char data, unsigned char control);
@@ -219,7 +224,31 @@ void PORTD_IRQHandler(void)
         // keyChar = KP_KeyChars[key];
 
         LCD_print(getModeName(currentMode));
-        UART0_print(getModeName(currentMode));
+        UART0_println(getModeName(currentMode));
+
+        switch (currentMode)  // CDL=> Here!
+        {
+            case MODE_1_ANALOG_SERVO_POS:
+
+                break;
+
+            case MODE_2_ANALOG_MTR_SPD:
+
+                break;
+
+            case MODE_3_SER_SERVO_SCAN:
+                UART0_println("Enter a scan speed for the servo (0 to 100):");
+                break;
+
+            case MODE_4_SER_SERVO_POS:
+                UART0_println("Enter an angular position for the servo (-90 to +90):");
+                break;
+
+            case MODE_5_SER_MOTOR_SPD:
+                UART0_println("Enter a speed for the DC Motor (0 to 100):");
+                break;
+        }
+
     }
     PORTD->ISFR |= PORT_ISFR_ISF(0x38);  // Clear interrupt flags
 }
@@ -367,11 +396,47 @@ void UART0_println(char* string)
  */
 void UART0_IRQHandler(void)
 {
+    char character;
+
+    if (UART0->S1 & UART_S1_RDRF_MASK)  // Check for RDRF flag (data available)
+    {
+        // Receive a character and clear the RDRF flag
+        character = UART0->D;
+
+        if ((currentMode == MODE_3_SER_SERVO_SCAN) ||
+            (currentMode == MODE_4_SER_SERVO_POS)  ||
+            (currentMode == MODE_5_SER_MOTOR_SPD))
+        {
+            if (character == '\r')  // Enter is pressed
+            {
+                // Add Linebreak
+                UART0_TransmitPoll('\r');
+                UART0_TransmitPoll('\n');
+
+                // End string
+                UART0_receiveBuffer[UART0_receiveCounter++] = '\0';
+
+                // CDL=> Do something with string
+                UART0_println(UART0_receiveBuffer);
+
+                UART0_receiveCounter = 0;  // Reset buffer
+            }
+            else
+            {
+                UART0_TransmitPoll(character);
+
+                // Add character to receive buffer
+                UART0_receiveBuffer[UART0_receiveCounter++] = character;
+            }
+
+            // Overflow case (simply reset buffer counter)
+            if (UART0_receiveCounter == UART0_RECEIVE_BUFFER_MAX_LENGTH)
+            {
+                UART0_receiveCounter = 0;
+            }
+        }
+    }
     // CDL=> Add transmit interrupts?
-    // CDL=> Come back here later
-    char c;
-    c = UART0->D;
-    UART0_TransmitPoll(c);
 }
 
 /*
