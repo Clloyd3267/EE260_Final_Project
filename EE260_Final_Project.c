@@ -11,6 +11,8 @@
 // Includes
 #include "board.h"
 #include "MKL25Z4.h"
+#include <stdlib.h>
+#include <ctype.h>
 
 // An enum to define the operating modes (states) of the program // CDL=> Explain each mode here and in description
 typedef enum
@@ -72,6 +74,11 @@ void Buzzer_PWMTimerInit(void);
 // Onboard LEDs (LED_ prefix) related functionality
 void LED_init(void);
 
+// CDL=> Motors
+int SERVO_scanSpeed;
+float SERVO_angularPosition;
+int DC_motorSpeed;
+
 // Other Functions
 #define SYSTEM_CLOCK 48000000  // 48 MHz system clock
 void delayTicks(int ticks);
@@ -105,7 +112,7 @@ int main(void)
     // Set the starting mode
     currentMode = DEFAULT_MODE;
     LCD_print(getModeName(currentMode));
-    UART0_print(getModeName(currentMode));
+    UART0_println(getModeName(currentMode));
 
     // Empty main control loop to demonstrate that the program can operate
     // with just interrupts
@@ -416,12 +423,53 @@ void UART0_IRQHandler(void)
                 // End string
                 UART0_receiveBuffer[UART0_receiveCounter++] = '\0';
 
-                // CDL=> Do something with string
+                // Get a float representation of the string
+                float val = atof(UART0_receiveBuffer);
+
+                // Check for error in conversion
+                if (!val)
+                {
+                    UART0_println("Error: Invalid number!");
+                }
+                else
+                {
+                    // Parse and validate number based on mode
+                    switch (currentMode)
+                    {
+                        case MODE_3_SER_SERVO_SCAN:
+                            SERVO_scanSpeed = (int)val;
+                            if ((SERVO_scanSpeed < 0) || 
+                                (SERVO_scanSpeed > 100))
+                            {
+                                UART0_println("Error: Invalid number!");
+                            }
+                            break;
+
+                        case MODE_4_SER_SERVO_POS:
+                            SERVO_angularPosition = val;
+                            if ((SERVO_angularPosition < -90) || 
+                                (SERVO_angularPosition > 90))
+                            {
+                                UART0_println("Error: Invalid number!");
+                            }
+                            break;
+
+                        case MODE_5_SER_MOTOR_SPD:
+                            DC_motorSpeed = (int)val;
+                            if ((DC_motorSpeed < 0) || 
+                                (DC_motorSpeed > 100))
+                            {
+                                UART0_println("Error: Invalid number!");
+                            }
+                            break;
+                    }
+                }
+
                 UART0_println(UART0_receiveBuffer);
 
                 UART0_receiveCounter = 0;  // Reset buffer
             }
-            else
+            else if (isalnum(character) || ispunct(character))
             {
                 UART0_TransmitPoll(character);
 
