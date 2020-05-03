@@ -25,8 +25,8 @@ typedef enum
 } modes;
 #define DEFAULT_MODE MODE_1_ANALOG_SERVO_POS
 modes currentMode;
-char* modeToString(modes mode);
 char* getModeName(modes mode);
+void setCurrentMode(modes mode);
 
 // Keypad (KP_ prefix) related functionality
 void KP_init(void);
@@ -74,10 +74,11 @@ void Buzzer_PWMTimerInit(void);
 // Onboard LEDs (LED_ prefix) related functionality
 void LED_init(void);
 
-// CDL=> Motors
-int SERVO_scanSpeed;
-float SERVO_angularPosition;
-int DC_motorSpeed;
+// Servo and DC Motor (MOTOR_ prefix) related functionality
+int MTR_servoScanSpeed;
+float MTR_servoAngularPos;
+int MTR_dcSpeed;
+void MTR_PWMTimerInit(void);
 
 // Other Functions
 #define SYSTEM_CLOCK 48000000  // 48 MHz system clock
@@ -104,39 +105,19 @@ int main(void)
     __disable_irq();         // Global disable IRQs (during setup)
     KP_init();               // Initialize the keypad interface
     UART0_init();            // Initialize the UART0 interface
-    Buzzer_PWMTimerInit();   // Init buzzer TPM timer
     US_TriggerTimerInit();   // Init trigger pin of ultrasonic sensor
     US_CaptureTimerInit();   // Init echo pin of ultrasonic sensor
+    Buzzer_PWMTimerInit();   // Init buzzer TPM timer
+    MTR_PWMTimerInit();      // Init DC and Servo Motor interface
     __enable_irq();          // Global enable IRQs (after setup)
 
     // Set the starting mode
-    currentMode = DEFAULT_MODE;
-    LCD_print(getModeName(currentMode));
-    UART0_println(getModeName(currentMode));
+    setCurrentMode(DEFAULT_MODE);
 
     // Empty main control loop to demonstrate that the program can operate
     // with just interrupts
     while (1) {}
 }
-
-// char* modeToString(modes mode) // CDL=> Remove later. Debug only!
-// {
-//     switch (mode)
-//     {
-//         case MODE_1_ANALOG_SERVO_POS:
-//             return "MODE_1_ANALOG_SERVO_POS";
-//         case MODE_2_ANALOG_MTR_SPD:
-//             return "MODE_2_ANALOG_MTR_SPD";
-//         case MODE_3_SER_SERVO_SCAN:
-//             return "MODE_3_SER_SERVO_SCAN";
-//         case MODE_4_SER_SERVO_POS:
-//             return "MODE_4_SER_SERVO_POS";
-//         case MODE_5_SER_MOTOR_SPD:
-//             return "MODE_5_SER_MOTOR_SPD";
-//         default:
-//             return "ERROR: Invalid Mode!!!";
-//     }
-// }
 
 /*
  * This function returns a character array (cstring) representation of a (mode).
@@ -145,7 +126,6 @@ int main(void)
  * - mode (enum modes): The mode to convert to string.
  *
  * Return:
- *
  * - (char*): A character array (cstring) representation of a (mode).
  */
 char* getModeName(modes mode)
@@ -164,6 +144,67 @@ char* getModeName(modes mode)
             return "SER_MOTOR_SPD";
         default:
             return "Invalid Mode!!!";
+    }
+}
+
+/*
+ * This function sets the current mode and enables/disables devices based on the
+ * mode.
+ *
+ * Arguments:
+ * - mode (enum modes): The mode to set.
+ *
+ * Return: None (void)
+ */
+void setCurrentMode(modes mode)
+{
+    // Set the current mode
+    currentMode = mode;
+
+    // Print the current mode to the terminal and LCD  // CDL=> Add more info to the LCD later
+    LCD_print(getModeName(currentMode));
+    UART0_println(getModeName(currentMode));
+
+    // Print mode specific information
+    switch (currentMode)
+    {
+        case MODE_1_ANALOG_SERVO_POS:
+            break;
+
+        case MODE_2_ANALOG_MTR_SPD:
+            break;
+
+        case MODE_3_SER_SERVO_SCAN:
+            UART0_println("Enter a scan speed for the servo (0 to 100):");
+            break;
+
+        case MODE_4_SER_SERVO_POS:
+            UART0_println("Enter an angular position for the servo (-90 to +90):");
+            break;
+
+        case MODE_5_SER_MOTOR_SPD:
+            UART0_println("Enter a speed for the DC Motor (0 to 100):");
+            break;
+    }
+
+    // Enable/Disable motor PWM timer channels // CDL=> Could be combined with above switch statement
+    switch (currentMode)
+    {
+        case MODE_1_ANALOG_SERVO_POS:
+        case MODE_3_SER_SERVO_SCAN:
+        case MODE_4_SER_SERVO_POS:
+            TPM0->CONTROLS[1].CnSC = 0;
+            TPM0->CONTROLS[2].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
+            break;
+
+        case MODE_2_ANALOG_MTR_SPD:
+        case MODE_5_SER_MOTOR_SPD:
+            TPM0->CONTROLS[1].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
+            TPM0->CONTROLS[2].CnSC = 0;
+            break;
+        default:
+            break;
+
     }
 }
 
@@ -216,46 +257,15 @@ void KP_init(void)
  */
 void PORTD_IRQHandler(void)
 {
-    unsigned char key;  // Actual value of key press
-//    char keyChar;       // Character representation of value of key press
+    char key;
 
     key = KP_getkey();  // Get pressed key from keypad
 
-    // Ensure key was not released too soon
+    // Ensure key was not released too soon and mode is not the current one
     if ((key != 0x0) && (key != currentMode))
     {
         // Change to state described by key
-        currentMode = key;
-
-        // Get character representation of key // CDL=> Remove later?
-        // keyChar = KP_KeyChars[key];
-
-        LCD_print(getModeName(currentMode));
-        UART0_println(getModeName(currentMode));
-
-        switch (currentMode)  // CDL=> Here!
-        {
-            case MODE_1_ANALOG_SERVO_POS:
-
-                break;
-
-            case MODE_2_ANALOG_MTR_SPD:
-
-                break;
-
-            case MODE_3_SER_SERVO_SCAN:
-                UART0_println("Enter a scan speed for the servo (0 to 100):");
-                break;
-
-            case MODE_4_SER_SERVO_POS:
-                UART0_println("Enter an angular position for the servo (-90 to +90):");
-                break;
-
-            case MODE_5_SER_MOTOR_SPD:
-                UART0_println("Enter a speed for the DC Motor (0 to 100):");
-                break;
-        }
-
+        setCurrentMode(key);
     }
     PORTD->ISFR |= PORT_ISFR_ISF(0x38);  // Clear interrupt flags
 }
@@ -410,6 +420,7 @@ void UART0_IRQHandler(void)
         // Receive a character and clear the RDRF flag
         character = UART0->D;
 
+        // Ensure only in a mode which needs the serial terminal
         if ((currentMode == MODE_3_SER_SERVO_SCAN) ||
             (currentMode == MODE_4_SER_SERVO_POS)  ||
             (currentMode == MODE_5_SER_MOTOR_SPD))
@@ -426,46 +437,49 @@ void UART0_IRQHandler(void)
                 // Get a float representation of the string
                 float val = atof(UART0_receiveBuffer);
 
-                // Check for error in conversion
-                if (!val)
+                // Parse and validate number based on mode
+                switch (currentMode)
                 {
-                    UART0_println("Error: Invalid number!");
+                    case MODE_3_SER_SERVO_SCAN:
+                        MTR_servoScanSpeed = (int)val;
+                        if ((MTR_servoScanSpeed < 0) ||
+                            (MTR_servoScanSpeed > 100))
+                        {
+                            UART0_println("Error: Invalid number!");
+                        }
+                        break;
+
+                    case MODE_4_SER_SERVO_POS:
+                        MTR_servoAngularPos = val;
+                        if ((MTR_servoAngularPos < -90) ||
+                            (MTR_servoAngularPos > 90))
+                        {
+                            UART0_println("Error: Invalid number!");
+                        }
+                        else
+                        {
+                            // Set servo position to a certain angular position
+                            TPM0->CONTROLS[2].CnV = 1659 +
+                                                (MTR_servoAngularPos + 90) * 33;
+                        }
+                        break;
+
+                    case MODE_5_SER_MOTOR_SPD:
+                        MTR_dcSpeed = (int)val;
+                        if ((MTR_dcSpeed < 0) ||
+                            (MTR_dcSpeed > 100))
+                        {
+                            UART0_println("Error: Invalid number!");
+                        }
+                        // else  // CDL=> Here
+                        // {
+                        //     TPM0->CONTROLS[3].CnV = MTR_dcSpeed * 600;
+                        // }
+                        break;
+
+                    default:
+                        break;
                 }
-                else
-                {
-                    // Parse and validate number based on mode
-                    switch (currentMode)
-                    {
-                        case MODE_3_SER_SERVO_SCAN:
-                            SERVO_scanSpeed = (int)val;
-                            if ((SERVO_scanSpeed < 0) || 
-                                (SERVO_scanSpeed > 100))
-                            {
-                                UART0_println("Error: Invalid number!");
-                            }
-                            break;
-
-                        case MODE_4_SER_SERVO_POS:
-                            SERVO_angularPosition = val;
-                            if ((SERVO_angularPosition < -90) || 
-                                (SERVO_angularPosition > 90))
-                            {
-                                UART0_println("Error: Invalid number!");
-                            }
-                            break;
-
-                        case MODE_5_SER_MOTOR_SPD:
-                            DC_motorSpeed = (int)val;
-                            if ((DC_motorSpeed < 0) || 
-                                (DC_motorSpeed > 100))
-                            {
-                                UART0_println("Error: Invalid number!");
-                            }
-                            break;
-                    }
-                }
-
-                UART0_println(UART0_receiveBuffer);
 
                 UART0_receiveCounter = 0;  // Reset buffer
             }
@@ -514,13 +528,13 @@ void LCD_init(void)
     delayMs(1);
     LCD_nibble_write(0x03, LCD_RS_SETTINGS);
     delayMs(1);
-    LCD_nibble_write(0x02, LCD_RS_SETTINGS);            // Use 4-bit data mode
+    LCD_nibble_write(0x02, LCD_RS_SETTINGS);
     delayMs(1);
 
-    LCD_command(0x28);                     // Set 4-bit data, 2-line, 5x7 font
-    LCD_command(0x06);                     // Move cursor right
-    LCD_command(0x01);                     // Clear screen, move cursor to home
-    LCD_command(0x0F);                     // Turn on display, cursor blinking
+    LCD_command(0x28);                      // Set 4-bit data, 2-line, 5x7 font
+    LCD_command(0x06);                      // Move cursor right
+    LCD_command(0x01);                      // Clear screen, move cursor to home
+    LCD_command(0x0F);                      // Turn on display, cursor blinking
 }
 
 /*
@@ -700,7 +714,8 @@ void Buzzer_PWMTimerInit(void)
  */
 void TPM1_IRQHandler(void)
 {
-    if ((currentMode == MODE_2_ANALOG_MTR_SPD) || (currentMode == MODE_5_SER_MOTOR_SPD))
+    if ((currentMode == MODE_2_ANALOG_MTR_SPD) ||
+        (currentMode == MODE_5_SER_MOTOR_SPD))
     {
         // Calculate pulse width
         US_cont[US_index % 2] = TPM1->CONTROLS[1].CnV;
@@ -787,6 +802,41 @@ void LED_init(void)
     SIM->SCGC5     |=  SIM_SCGC5_PORTB(1);      // Enable clock to Port B
     PORTB->PCR[18] |=  PORT_PCR_MUX(1);         // Make PTB18 pin as GPIO
     PTB->PDDR      |=  GPIO_PDDR_PDD(0x40000);  // Make PTB18 an output pin
+}
+
+/*
+ * This function initializes the TPM0_CH1 and TPM0_CH2 PWM interfaces.
+ *
+ * PTA5  -> Servo Motor -> TPM0_CH2
+ * PTE30 -> DC Motor    -> TPM0_CH3
+ *
+ * Arguments: None
+ *
+ * Return: None (void)
+ */
+void MTR_PWMTimerInit(void)
+{
+    MTR_servoAngularPos = 0;
+
+    SIM->SCGC5    |= SIM_SCGC5_PORTA(1);   // Enable clock to Port A
+    SIM->SCGC5    |= SIM_SCGC5_PORTE(1);   // Enable clock to Port E
+    PORTA->PCR[5]  = PORT_PCR_MUX(3);      // PTA5 used by TPM0_CH2
+    // PORTE->PCR[30] = PORT_PCR_MUX(3);      // PTE30 used by TPM0_CH3
+    SIM->SCGC6    |= SIM_SCGC6_TPM0(1);    // Enable clock to TPM0
+    SIM->SOPT2    |= SIM_SOPT2_TPMSRC(1);  // Use MCGFLLCLK as timer clock
+    TPM0->SC       = 0;                    // Disable timer
+
+    // Enable TPM0_CH2 as edge-aligned PWM
+    TPM0->CONTROLS[2].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
+    TPM0->CONTROLS[2].CnV   = 1659;
+
+    // Enable TPM0_CH1 as edge-aligned PWM
+    // TPM0->CONTROLS[3].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
+    // TPM0->CONTROLS[3].CnV   = 0;    
+
+    TPM0->MOD               = 60000;           // Set up modulo for 20ms period
+    TPM0->SC               |= TPM_SC_PS(4);    // Use prescaler of /2^4=16
+    TPM0->SC               |= TPM_SC_CMOD(1);  // Enable counter for PWM
 }
 
 /*
