@@ -78,6 +78,8 @@ void LED_init(void);
 int MTR_servoScanSpeed;
 float MTR_servoAngularPos;
 int MTR_dcSpeed;
+int countUp;
+#define MTR_SCAN_INCR 5
 void MTR_PWMTimerInit(void);
 
 // Other Functions
@@ -187,20 +189,36 @@ void setCurrentMode(modes mode)
             break;
     }
 
+    // Setup servo scan mode
+    if (currentMode == MODE_3_SER_SERVO_SCAN)
+    {
+        SysTick->LOAD = 150000;  // Set slowest speed
+        SysTick->VAL = 0;        // Ensure timer is reset
+
+        __disable_irq();         // Global disable IRQs
+        // Use 48 Mhz / 16 clock, interrupt, and enable timer
+        SysTick->CTRL = SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;
+        __enable_irq();          // Global enable IRQs
+    }
+    else
+    {
+        SysTick->CTRL = 0;       // Disable timer
+    }
+
     // Enable/Disable motor PWM timer channels // CDL=> Could be combined with above switch statement
     switch (currentMode)
     {
         case MODE_1_ANALOG_SERVO_POS:
         case MODE_3_SER_SERVO_SCAN:
         case MODE_4_SER_SERVO_POS:
-            TPM0->CONTROLS[1].CnSC = 0;
             TPM0->CONTROLS[2].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
+            TPM0->CONTROLS[3].CnSC = 0;
             break;
 
         case MODE_2_ANALOG_MTR_SPD:
         case MODE_5_SER_MOTOR_SPD:
-            TPM0->CONTROLS[1].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
             TPM0->CONTROLS[2].CnSC = 0;
+            TPM0->CONTROLS[3].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
             break;
         default:
             break;
@@ -242,6 +260,7 @@ void KP_init(void)
     PTD->PDDR     |= GPIO_PDDR_PDD(0x05);  // Make rows outputs, cols inputs
     PTD->PCOR     |= GPIO_PCOR_PTCO(0x05); // Enable all rows
 
+    NVIC_SetPriority(PORTD_IRQn, 0);       // CDL=> Needed?
     NVIC_EnableIRQ(PORTD_IRQn);            // Enable IRQ31 (PTD interrupts)
 }
 
@@ -447,6 +466,11 @@ void UART0_IRQHandler(void)
                         {
                             UART0_println("Error: Invalid number!");
                         }
+                        else
+                        {
+                            // Set the Servo Motor scan speed to a certain value
+                            SysTick->LOAD = 150000 - MTR_servoScanSpeed * 1200;
+                        }
                         break;
 
                     case MODE_4_SER_SERVO_POS:
@@ -471,8 +495,9 @@ void UART0_IRQHandler(void)
                         {
                             UART0_println("Error: Invalid number!");
                         }
-                        else  // CDL=> Here
+                        else
                         {
+                            // Set the DC Motor speed to a certain speed
                             TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 420);
                         }
                         break;
@@ -483,7 +508,7 @@ void UART0_IRQHandler(void)
 
                 UART0_receiveCounter = 0;  // Reset buffer
             }
-            else if (isalnum(character) || ispunct(character))
+            else if (isalnum(character) || ispunct(character))  // CDL=> Add backspace?
             {
                 UART0_TransmitPoll(character);
 
@@ -669,6 +694,7 @@ void US_CaptureTimerInit(void)
     TPM1->SC               |= TPM_SC_PS(6);         // Prescaler of /2^6 = /64
     TPM1->SC               |= TPM_SC_TOF(1);        // Clear TOF
     TPM1->SC               |= TPM_SC_CMOD(1);       // Enable timer
+    NVIC_SetPriority(PORTD_IRQn, 1);                // CDL=> Needed?
     NVIC_EnableIRQ(TPM1_IRQn);                      // Enable IRQ18 (TPM1)
 }
 
@@ -816,15 +842,19 @@ void LED_init(void)
  */
 void MTR_PWMTimerInit(void)
 {
-    MTR_servoAngularPos = 0;
+    // Initialize motor variables
+    MTR_servoScanSpeed = 0;
+    MTR_servoAngularPos = -90;
+    MTR_dcSpeed = 0;
+    countUp = 1;
 
-    SIM->SCGC5    |= SIM_SCGC5_PORTA(1);   // Enable clock to Port A
-    SIM->SCGC5    |= SIM_SCGC5_PORTE(1);   // Enable clock to Port E
-    PORTA->PCR[5]  = PORT_PCR_MUX(3);      // PTA5 used by TPM0_CH2
-    PORTE->PCR[30] = PORT_PCR_MUX(3);      // PTE30 used by TPM0_CH3
-    SIM->SCGC6    |= SIM_SCGC6_TPM0(1);    // Enable clock to TPM0
-    SIM->SOPT2    |= SIM_SOPT2_TPMSRC(1);  // Use MCGFLLCLK as timer clock
-    TPM0->SC       = 0;                    // Disable timer
+    SIM->SCGC5    |= SIM_SCGC5_PORTA(1);       // Enable clock to Port A
+    SIM->SCGC5    |= SIM_SCGC5_PORTE(1);       // Enable clock to Port E
+    PORTA->PCR[5]  = PORT_PCR_MUX(3);          // PTA5 used by TPM0_CH2
+    PORTE->PCR[30] = PORT_PCR_MUX(3);          // PTE30 used by TPM0_CH3
+    SIM->SCGC6    |= SIM_SCGC6_TPM0(1);        // Enable clock to TPM0
+    SIM->SOPT2    |= SIM_SOPT2_TPMSRC(1);      // Use MCGFLLCLK as timer clock
+    TPM0->SC       = 0;                        // Disable timer
 
     // Enable TPM0_CH2 as edge-aligned PWM
     TPM0->CONTROLS[2].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
@@ -893,4 +923,46 @@ void delayUs(int us)
 {
     // Set timer for (us) us
     delayTicks((us * (SYSTEM_CLOCK / 16)) / 1000000);
+}
+
+/*
+ * This interrupt function is used change the angular position of the servo
+ * motor to make it scan back and forth. The speed of the scan is controlled by
+ * the count of the SysTick Counter. Setup for a counter value between 50ms and
+ * 10ms.
+ *
+ * Gets called (interrupts) when the SysTick timer reaches 0 or the count
+ * flag is enabled.
+ *
+ * Arguments: None (void)
+ *
+ * Return: None (void)
+ */
+void SysTick_Handler(void)
+{
+    if (currentMode == MODE_3_SER_SERVO_SCAN)
+    {
+        // Set servo position to a certain angular position
+        TPM0->CONTROLS[2].CnV = 1659 + ((MTR_servoAngularPos) + 90) * 33;
+
+        // Increment degrees
+        if (countUp)
+        {
+            MTR_servoAngularPos += MTR_SCAN_INCR;
+        }
+        else
+        {
+            MTR_servoAngularPos -= MTR_SCAN_INCR;
+        }
+
+        // Change direction when reaching -90 or 90 degrees
+        if (MTR_servoAngularPos > 90)
+        {
+            countUp = 0;
+        }
+        if (-90 > MTR_servoAngularPos)
+        {
+            countUp = 1;
+        }
+    }
 }
