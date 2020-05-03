@@ -82,6 +82,9 @@ int countUp;
 #define MTR_SCAN_INCR 5
 void MTR_PWMTimerInit(void);
 
+// Analog to Digital 0 (ADC0_ prefix) related functionality
+void ADC0_init(void);
+
 // Other Functions
 #define SYSTEM_CLOCK 48000000  // 48 MHz system clock
 void delayTicks(int ticks);
@@ -111,6 +114,7 @@ int main(void)
     US_CaptureTimerInit();   // Init echo pin of ultrasonic sensor
     Buzzer_PWMTimerInit();   // Init buzzer TPM timer
     MTR_PWMTimerInit();      // Init DC and Servo Motor interface
+    ADC0_init();             // Init ADC0 interface
     __enable_irq();          // Global enable IRQs (after setup)
 
     // Set the starting mode
@@ -776,6 +780,7 @@ void TPM1_IRQHandler(void)
                 TPM2->MOD = 1000 + 208 * US_distanceInches;
                 TPM2->CONTROLS[0].CnV = TPM2->MOD / 2;
                 TPM2->SC |= TPM_SC_CMOD(1);            // Enable buzzer
+                // CDL=> Stop Motor Later
             }
             else if (US_distanceFeet < (float)2.0)
             {
@@ -867,6 +872,137 @@ void MTR_PWMTimerInit(void)
     TPM0->MOD               = 60000;           // Set up modulo for 20ms period
     TPM0->SC               |= TPM_SC_PS(4);    // Use prescaler of /2^4=16
     TPM0->SC               |= TPM_SC_CMOD(1);  // Enable counter for PWM
+    TPM0->SC               |= TPM_SC_TOIE(1);  // Enable Timer overflow interrupt
+
+    // CDL=> Set a priority?
+    NVIC_EnableIRQ(TPM0_IRQn);      // Enable IRQ17 (TPM0)
+}
+
+/*
+ * This function initializes the ADC0 analog input interface.
+ *
+ * PTE20 -> Potentiometer   -> ADC0_CH0
+ * PTE21 -> Photo Resistors -> ADC0_CH4
+ *
+ * Arguments: None
+ *
+ * Return: None (void)
+ */
+void ADC0_init(void)
+{
+    uint16_t calibration;
+
+    SIM->SCGC5    |= SIM_SCGC5_PORTE(1);  // Clock to PORTE
+    PORTE->PCR[20] = PORT_PCR_MUX(0);     // PTE20 analog input
+    PORTE->PCR[21] = PORT_PCR_MUX(0);     // PTE21 analog input
+
+    SIM->SCGC6    |= SIM_SCGC6_ADC0(1);   // Clock to ADC0
+    ADC0->SC2     &= ~ADC_SC2_ADTRG(1);   // Software trigger
+
+    // Clock div by 4, long sample time, single ended 12 bit, bus clock
+    ADC0->CFG1     = ADC_CFG1_ADIV(2)   |
+                     ADC_CFG1_ADLSMP(1) |
+                     ADC_CFG1_MODE(1)   |
+                     ADC_CFG1_ADICLK(0);
+
+    // Start Calibration
+    ADC0->SC3 |= ADC_SC3_CAL_MASK;
+    while (ADC0->SC3 & ADC_SC3_CAL_MASK) {}  // Wait for calibration to complete
+
+    // Initialize a 16-bit variable in RAM
+    calibration = 0x0;
+
+    // Add the plus-side calibration results to the variable
+    calibration += ADC0->CLP0;
+    calibration += ADC0->CLP1;
+    calibration += ADC0->CLP2;
+    calibration += ADC0->CLP3;
+    calibration += ADC0->CLP4;
+    calibration += ADC0->CLPS;
+
+    // Divide by two
+    calibration /= 2;
+
+    // Set the MSB of the variable
+    calibration |= 0x8000;
+
+    // Store the value in the plus-side gain calibration register
+    ADC0->PG = calibration;
+
+    // Repeat the procedure for the minus-side calibration value
+    calibration  = 0x0000;
+    calibration += ADC0->CLM0;
+    calibration += ADC0->CLM1;
+    calibration += ADC0->CLM2;
+    calibration += ADC0->CLM3;
+    calibration += ADC0->CLM4;
+    calibration += ADC0->CLMS;
+    calibration /= 2;
+    calibration |= 0x8000;
+    ADC0->MG     = calibration;
+
+    // Calibration done
+
+    // Reconfigure ADC0
+    // Clock div by 4, long sample time, single ended 12 bit, bus clock
+    ADC0->CFG1     = ADC_CFG1_ADIV(2)   |
+                     ADC_CFG1_ADLSMP(1) |
+                     ADC_CFG1_MODE(1)   |
+                     ADC_CFG1_ADICLK(0);
+
+    // CDL=> Set interrupt priority?
+    NVIC_EnableIRQ(ADC0_IRQn);         // Enable ADC0 interrupt
+    ADC0->SC1[0] |= ADC_SC1_AIEN_MASK; // Set up ADC0 interface to use interrupt
+}
+
+/*
+ * This interrupt function is used to start an analog to digital conversion 
+ * based on the current mode.
+ *
+ * Gets called (interrupts) around every 20ms ie. when the TPM0 timer has a
+ * TOF (timer overflow flag).
+ *
+ * Arguments: None (void)
+ *
+ * Return: None (void)
+ */
+void TPM0_IRQHandler(void)
+{
+    if (currentMode == MODE_1_ANALOG_SERVO_POS)
+    {
+        // CDL=> Fill out later
+    }
+    else if (currentMode == MODE_2_ANALOG_MTR_SPD)
+    {
+        ADC0->SC1[0] &= ~0x1F;  // Start conversion on channel 0
+    }
+    TPM0->SC |= TPM_SC_TOF(1);  // Enable Timer overflow interrupt
+}
+
+/*
+ * This interrupt function reads the value of the ADC0 data register when the
+ * ADC0 finishes.
+ *
+ * Gets called (interrupts) around 10 ms after starting the ADC0 ie. when the
+ * ADC0 triggers a COCO (Conversion Complete) flag.
+ *
+ * Arguments: None (void)
+ *
+ * Return: None (void)
+ */
+void ADC0_IRQHandler(void)
+{
+    MTR_dcSpeed = ADC0->R[0];  // Read conversion result and clear COCO flag
+
+    if (currentMode == MODE_1_ANALOG_SERVO_POS)
+    {
+        // CDL=> Fill out later
+    }
+    else if (currentMode == MODE_2_ANALOG_MTR_SPD)
+    {
+        // Set the DC Motor speed to a certain speed
+        TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 10);
+    }
 }
 
 /*
