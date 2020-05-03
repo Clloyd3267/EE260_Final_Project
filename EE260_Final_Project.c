@@ -471,10 +471,10 @@ void UART0_IRQHandler(void)
                         {
                             UART0_println("Error: Invalid number!");
                         }
-                        // else  // CDL=> Here
-                        // {
-                        //     TPM0->CONTROLS[3].CnV = MTR_dcSpeed * 600;
-                        // }
+                        else  // CDL=> Here
+                        {
+                            TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 420);
+                        }
                         break;
 
                     default:
@@ -821,7 +821,7 @@ void MTR_PWMTimerInit(void)
     SIM->SCGC5    |= SIM_SCGC5_PORTA(1);   // Enable clock to Port A
     SIM->SCGC5    |= SIM_SCGC5_PORTE(1);   // Enable clock to Port E
     PORTA->PCR[5]  = PORT_PCR_MUX(3);      // PTA5 used by TPM0_CH2
-    // PORTE->PCR[30] = PORT_PCR_MUX(3);      // PTE30 used by TPM0_CH3
+    PORTE->PCR[30] = PORT_PCR_MUX(3);      // PTE30 used by TPM0_CH3
     SIM->SCGC6    |= SIM_SCGC6_TPM0(1);    // Enable clock to TPM0
     SIM->SOPT2    |= SIM_SOPT2_TPMSRC(1);  // Use MCGFLLCLK as timer clock
     TPM0->SC       = 0;                    // Disable timer
@@ -831,8 +831,8 @@ void MTR_PWMTimerInit(void)
     TPM0->CONTROLS[2].CnV   = 1659;
 
     // Enable TPM0_CH1 as edge-aligned PWM
-    // TPM0->CONTROLS[3].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
-    // TPM0->CONTROLS[3].CnV   = 0;    
+    TPM0->CONTROLS[3].CnSC |= TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
+    TPM0->CONTROLS[3].CnV   = 0;
 
     TPM0->MOD               = 60000;           // Set up modulo for 20ms period
     TPM0->SC               |= TPM_SC_PS(4);    // Use prescaler of /2^4=16
