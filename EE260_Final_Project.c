@@ -4,7 +4,20 @@
  * Class        : EE260 (Final Project)
  * Due Date     : 2020-05-04
  * Target Board : FRDM_KL25Z
- * Description  : CDL=> Here Later
+ * Description  : This program demonstrates the interaction of multiple
+ *                interrupt handlers for a complicated program with many
+ *                interfaces. The program operates in five primary modes which
+ *                dictate which interfaces are used and how they are used. These
+ *                modes are controlled by a matrix keypad. These modes are as
+ *                follows:
+ *
+ *                 Mode 1: MODE_1_ANALOG_SERVO_POS
+ *                 Mode 2: MODE_2_ANALOG_MTR_SPD
+ *                 Mode 3: MODE_3_SER_SERVO_SCAN
+ *                 Mode 4: MODE_4_SER_SERVO_POS
+ *                 Mode 5: MODE_5_SER_MOTOR_SPD
+ *
+ * CDL=> Logic of interrupts modes conflicting?
  *
  */
 
@@ -12,9 +25,9 @@
 #include "board.h"
 #include "MKL25Z4.h"
 #include <stdlib.h>
-#include <ctype.h>
+#include <ctype.h>      // isalnum() ispunct()
 
-// An enum to define the operating modes (states) of the program // CDL=> Explain each mode here and in description
+// An enum to define the operating modes (states) of the program
 typedef enum
 {
     MODE_1_ANALOG_SERVO_POS = 0x1,
@@ -51,7 +64,7 @@ void LCD_init(void);
 void LCD_nibble_write(unsigned char data, unsigned char control);
 void LCD_command(unsigned char command);
 void LCD_data(unsigned char data);
-void LCD_print(char* string);
+void LCD_line1Print(char* string);
 #define LCD_EN 8  // BIT2 mask
 #define LCD_RS 4  // BIT0 mask
 #define LCD_RS_SETTINGS 0
@@ -104,18 +117,18 @@ int main(void)
     BOARD_InitBootClocks();  // Set system clock to 48 MHz internal clock
 
     // Initialize Interfaces
-    LED_init();              // Init Blue and Red LEDs
-    LCD_init();              // Init LCD interface
+    LED_init();             // Init Blue and Red LEDs
+    LCD_init();             // Init LCD interface
 
-    __disable_irq();         // Global disable IRQs (during setup)
-    KP_init();               // Initialize the keypad interface
-    UART0_init();            // Initialize the UART0 interface
-    US_TriggerTimerInit();   // Init trigger pin of ultrasonic sensor
-    US_CaptureTimerInit();   // Init echo pin of ultrasonic sensor
-    Buzzer_PWMTimerInit();   // Init buzzer TPM timer
-    MTR_PWMTimerInit();      // Init DC and Servo Motor interface
-    ADC0_init();             // Init ADC0 interface
-    __enable_irq();          // Global enable IRQs (after setup)
+    __disable_irq();        // Global disable IRQs (during setup)
+    KP_init();              // Initialize the keypad interface
+    UART0_init();           // Initialize the UART0 interface
+    US_TriggerTimerInit();  // Init trigger pin of ultrasonic sensor
+    US_CaptureTimerInit();  // Init echo pin of ultrasonic sensor
+    Buzzer_PWMTimerInit();  // Init buzzer TPM timer
+    MTR_PWMTimerInit();     // Init DC and Servo Motor interface
+    ADC0_init();            // Init ADC0 interface
+    __enable_irq();         // Global enable IRQs (after setup)
 
     // Set the starting mode
     setCurrentMode(DEFAULT_MODE);
@@ -168,18 +181,12 @@ void setCurrentMode(modes mode)
     currentMode = mode;
 
     // Print the current mode to the terminal and LCD
-    LCD_print(getModeName(currentMode));
+    LCD_line1Print(getModeName(currentMode));
     UART0_println(getModeName(currentMode));
 
     // Print mode specific information
     switch (currentMode)
     {
-        case MODE_1_ANALOG_SERVO_POS:
-            break;
-
-        case MODE_2_ANALOG_MTR_SPD:
-            break;
-
         case MODE_3_SER_SERVO_SCAN:
             UART0_println("Enter a scan speed for the servo (0 to 100):");
             break;
@@ -199,10 +206,10 @@ void setCurrentMode(modes mode)
         SysTick->LOAD = 150000;  // Set slowest speed
         SysTick->VAL = 0;        // Ensure timer is reset
 
-        __disable_irq();         // Global disable IRQs
+        __disable_irq();         // Global disable IRQs  // CDl=> Is this needed anytime an interrupt is toggled?
         // Use 48 Mhz / 16 clock, interrupt, and enable timer
         SysTick->CTRL = SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;
-        __enable_irq();          // Global enable IRQs
+        __enable_irq();          // Global enable IRQs // CDl=> SysTick IRQ Priority?
     }
     else
     {
@@ -315,15 +322,15 @@ char KP_getkey(void)
     // Only one row is active at a time (logic 0)
     const char row_select[] = {0x01, 0x04};
 
-    // Activate one row at a time and read the input to see which column is active
+    // Activate one row at a time and read input to see which column is active
     for (row = 0; row < 2; row++)
     {
         PTD->PSOR = GPIO_PSOR_PTSO(0x05);             // Drive all rows high
-        PTD->PCOR = GPIO_PCOR_PTCO(row_select[row]);  // Drive the active row low
+        PTD->PCOR = GPIO_PCOR_PTCO(row_select[row]);  // Drive active row low
 
         delayUs(2);               // Wait for signal to settle
         cols = PTD->PDIR & 0x38;  // Read all columns
-        if (cols != 0x38) break;  // Check if a column is low, meaning key pressed
+        if (cols != 0x38) break;  // Check if a column is low, or key is pressed
     }
 
     PTD->PCOR = GPIO_PCOR_PTCO(0x05);  // Enable all rows
@@ -359,7 +366,7 @@ void UART0_init(void)
     //
     // SBR = SYS_CLOCK / ((OSR + 1) * BAUD_RATE)
     //
-    uint16_t tmpSBR = SYSTEM_CLOCK / (UART0_BAUD_RATE * (UART0_OVER_SAMPLE + 1));
+    uint16_t tmpSBR = SYSTEM_CLOCK / (UART0_BAUD_RATE * (UART0_OVER_SAMPLE+1));
 
     // Set the OSR and the SBR (split into BDL and BDH)
     UART0->C4       = UARTLP_C4_OSR(UART0_OVER_SAMPLE);
@@ -389,7 +396,7 @@ void UART0_init(void)
 void UART0_TransmitPoll(char data)
 {
     // Wait until transmit register is empty
-    while (!(UART0->S1 & UART_S1_TDRE_MASK));
+    while (!(UART0->S1 & UART_S1_TDRE_MASK));  // CDL=> Can this be done with interrupts?
 
     // Send data
     UART0->D = data;
@@ -513,7 +520,6 @@ void UART0_IRQHandler(void)
                             TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 420);
                         }
                         break;
-
                     default:
                         break;
                 }
@@ -527,7 +533,7 @@ void UART0_IRQHandler(void)
                 // Add character to receive buffer
                 UART0_receiveBuffer[UART0_receiveCounter++] = character;
             }
-            else if (character == 0x7F)
+            else if (character == 0x7F)  // Backspace character
             {
                 UART0_TransmitPoll(character);
 
@@ -644,7 +650,7 @@ void LCD_data(unsigned char data)
  *
  * Return: None (void)
  */
-void LCD_print(char* string)
+void LCD_line1Print(char* string)
 {
     LCD_command(0x01);        // Clear display and set cursor to first line
 
@@ -924,7 +930,7 @@ void ADC0_init(void)
 
     // Start Calibration
     ADC0->SC3 |= ADC_SC3_CAL_MASK;
-    while (ADC0->SC3 & ADC_SC3_CAL_MASK) {}  // Wait for calibration to complete
+    while (ADC0->SC3 & ADC_SC3_CAL_MASK) {}  // Wait for calibration to complete  // CDL=> Polling Loop?
 
     // Initialize a 16-bit variable in RAM
     calibration = 0x0;
@@ -984,17 +990,17 @@ void ADC0_init(void)
  *
  * Return: None (void)
  */
-void TPM0_IRQHandler(void)
+void TPM0_IRQHandler(void)  // CDL=> Right logic for Mode 1?
 {
     if (currentMode == MODE_1_ANALOG_SERVO_POS)
     {
-        ADC0->SC1[0] &= ~0x1B;  // Start conversion on channel 4
+        ADC0->SC1[0] |= 0x04;    // Start conversion on channel 4
     }
     else if (currentMode == MODE_2_ANALOG_MTR_SPD)
     {
-        ADC0->SC1[0] |= 0x04;   // Start conversion on channel 0
+        ADC0->SC1[0] &= ~0x1F;   // Start conversion on channel 0
     }
-    TPM0->SC |= TPM_SC_TOF(1);  // Clear the TOF
+    TPM0->SC |= TPM_SC_TOF(1);   // Clear the TOF
 }
 
 /*
@@ -1043,10 +1049,11 @@ void ADC0_IRQHandler(void)
     }
     else if (currentMode == MODE_2_ANALOG_MTR_SPD)
     {
-        MTR_dcSpeed = result;
+        MTR_dcSpeed = result / 41;
 
         // Set the DC Motor speed to a certain speed
-        TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 10);
+        TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 420);
+        // TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 10);  // CDl=> Remove later
     }
 }
 
@@ -1071,7 +1078,7 @@ void delayTicks(int ticks)
     // Wait for timer to reach 0 (count reached)
     while ((SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk) == 0) {}
 
-    SysTick->CTRL = 0;  // Disable timer
+    SysTick->CTRL = 0;      // Disable timer
 }
 
 /*
@@ -1119,7 +1126,7 @@ void delayUs(int us)
  *
  * Return: None (void)
  */
-void SysTick_Handler(void)
+void SysTick_Handler(void)  // CDL=> Scan function logic make sense?
 {
     if (currentMode == MODE_3_SER_SERVO_SCAN)
     {
