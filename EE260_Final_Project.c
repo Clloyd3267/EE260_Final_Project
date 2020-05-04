@@ -17,8 +17,6 @@
  *                 Mode 4: MODE_4_SER_SERVO_POS
  *                 Mode 5: MODE_5_SER_MOTOR_SPD
  *
- * CDL=> Logic of interrupts modes conflicting?
- *
  */
 
 // Includes
@@ -26,6 +24,8 @@
 #include "MKL25Z4.h"
 #include <stdlib.h>
 #include <ctype.h>      // isalnum() ispunct()
+#include <stdio.h>
+#include <string.h>
 
 // An enum to define the operating modes (states) of the program
 typedef enum
@@ -55,8 +55,8 @@ void UART0_print(char* string);
 void UART0_println(char* string);
 
 // UART0 Receive buffer
-#define UART0_RECEIVE_BUFFER_MAX_LENGTH 100
-char UART0_receiveBuffer [UART0_RECEIVE_BUFFER_MAX_LENGTH];
+#define UART0_REC_BUF_MAX_LEN 100
+char UART0_receiveBuffer [UART0_REC_BUF_MAX_LEN];
 uint8_t UART0_receiveCounter = 0;
 
 // LCD Display (LCD_ prefix) related functionality
@@ -65,6 +65,7 @@ void LCD_nibble_write(unsigned char data, unsigned char control);
 void LCD_command(unsigned char command);
 void LCD_data(unsigned char data);
 void LCD_line1Print(char* string);
+void LCD_line2Print(char* string);
 #define LCD_EN 8  // BIT2 mask
 #define LCD_RS 4  // BIT0 mask
 #define LCD_RS_SETTINGS 0
@@ -206,10 +207,10 @@ void setCurrentMode(modes mode)
         SysTick->LOAD = 150000;  // Set slowest speed
         SysTick->VAL = 0;        // Ensure timer is reset
 
-        __disable_irq();         // Global disable IRQs  // CDl=> Is this needed anytime an interrupt is toggled?
+        __disable_irq();         // Global disable IRQs
         // Use 48 Mhz / 16 clock, interrupt, and enable timer
         SysTick->CTRL = SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;
-        __enable_irq();          // Global enable IRQs // CDl=> SysTick IRQ Priority?
+        __enable_irq();          // Global enable IRQs
     }
     else
     {
@@ -396,7 +397,7 @@ void UART0_init(void)
 void UART0_TransmitPoll(char data)
 {
     // Wait until transmit register is empty
-    while (!(UART0->S1 & UART_S1_TDRE_MASK));  // CDL=> Can this be done with interrupts?
+    while (!(UART0->S1 & UART_S1_TDRE_MASK));
 
     // Send data
     UART0->D = data;
@@ -489,6 +490,11 @@ void UART0_IRQHandler(void)
                         {
                             // Set the Servo Motor scan speed to a certain value
                             SysTick->LOAD = 150000 - MTR_servoScanSpeed * 1200;
+                            
+                            // Print speed to LCD
+                            char tmpBuffer[UART0_REC_BUF_MAX_LEN] = "Speed: ";
+                            strcat(&tmpBuffer, &UART0_receiveBuffer);
+                            LCD_line2Print(tmpBuffer);
                         }
                         break;
 
@@ -504,6 +510,11 @@ void UART0_IRQHandler(void)
                             // Set servo position to a certain angular position
                             TPM0->CONTROLS[2].CnV = 1659 +
                                                 (MTR_servoAngularPos + 90) * 33;
+
+                            // Print speed to LCD
+                            char tmpBuffer[UART0_REC_BUF_MAX_LEN] = "Position: ";
+                            strcat(&tmpBuffer, &UART0_receiveBuffer);
+                            LCD_line2Print(tmpBuffer);                                            
                         }
                         break;
 
@@ -518,6 +529,11 @@ void UART0_IRQHandler(void)
                         {
                             // Set the DC Motor speed to a certain speed
                             TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 420);
+                            
+                            // Print speed to LCD
+                            char tmpBuffer[UART0_REC_BUF_MAX_LEN] = "Speed: ";
+                            strcat(&tmpBuffer, &UART0_receiveBuffer);
+                            LCD_line2Print(tmpBuffer);                            
                         }
                         break;
                     default:
@@ -542,7 +558,7 @@ void UART0_IRQHandler(void)
             }
 
             // Overflow case (simply reset buffer counter)
-            if (UART0_receiveCounter == UART0_RECEIVE_BUFFER_MAX_LENGTH)
+            if (UART0_receiveCounter == UART0_REC_BUF_MAX_LEN)
             {
                 UART0_receiveCounter = 0;
             }
@@ -653,6 +669,26 @@ void LCD_data(unsigned char data)
 void LCD_line1Print(char* string)
 {
     LCD_command(0x01);        // Clear display and set cursor to first line
+
+    while (*string != 0)      // While not at end of cstring
+    {
+        LCD_data(*string++);  // Print Character
+    }
+}
+
+/*
+ * This function sends a cstring (with '\0' at end) to second row of the LCD.
+ *
+ * Note: This function does not send a linebreak "\r\n"!
+ *
+ * Arguments:
+ * - s: The cstring (char*) to send.
+ *
+ * Return: None (void)
+ */
+void LCD_line2Print(char* string)
+{
+    LCD_command(0xC0);        // Set Display to first character of second row
 
     while (*string != 0)      // While not at end of cstring
     {
@@ -930,7 +966,7 @@ void ADC0_init(void)
 
     // Start Calibration
     ADC0->SC3 |= ADC_SC3_CAL_MASK;
-    while (ADC0->SC3 & ADC_SC3_CAL_MASK) {}  // Wait for calibration to complete  // CDL=> Polling Loop?
+    while (ADC0->SC3 & ADC_SC3_CAL_MASK) {}  // Wait for calibration to complete
 
     // Initialize a 16-bit variable in RAM
     calibration = 0x0;
@@ -990,7 +1026,7 @@ void ADC0_init(void)
  *
  * Return: None (void)
  */
-void TPM0_IRQHandler(void)  // CDL=> Right logic for Mode 1?
+void TPM0_IRQHandler(void)
 {
     if (currentMode == MODE_1_ANALOG_SERVO_POS)
     {
@@ -1033,7 +1069,7 @@ void ADC0_IRQHandler(void)
             {
                 // Set servo position to a certain angular position
                 TPM0->CONTROLS[2].CnV = 1659 +
-                                    (MTR_servoAngularPos + 90) * 33;
+                                    (MTR_servoAngularPos + 90) * 33;                          
             }
             else
             {
@@ -1052,8 +1088,7 @@ void ADC0_IRQHandler(void)
         MTR_dcSpeed = result / 41;
 
         // Set the DC Motor speed to a certain speed
-        TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 420);
-        // TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 10);  // CDl=> Remove later
+        TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 420);      
     }
 }
 
@@ -1126,7 +1161,7 @@ void delayUs(int us)
  *
  * Return: None (void)
  */
-void SysTick_Handler(void)  // CDL=> Scan function logic make sense?
+void SysTick_Handler(void)
 {
     if (currentMode == MODE_3_SER_SERVO_SCAN)
     {
