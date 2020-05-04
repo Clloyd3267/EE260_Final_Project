@@ -956,7 +956,7 @@ void ADC0_init(void)
 }
 
 /*
- * This interrupt function is used to start an analog to digital conversion 
+ * This interrupt function is used to start an analog to digital conversion
  * based on the current mode.
  *
  * Gets called (interrupts) around every 20ms ie. when the TPM0 timer has a
@@ -970,13 +970,13 @@ void TPM0_IRQHandler(void)
 {
     if (currentMode == MODE_1_ANALOG_SERVO_POS)
     {
-        // CDL=> Fill out later
+        ADC0->SC1[0] &= ~0x1B;  // Start conversion on channel 4
     }
     else if (currentMode == MODE_2_ANALOG_MTR_SPD)
     {
-        ADC0->SC1[0] &= ~0x1F;  // Start conversion on channel 0
+        ADC0->SC1[0] |= 0x04;   // Start conversion on channel 0
     }
-    TPM0->SC |= TPM_SC_TOF(1);  // Enable Timer overflow interrupt
+    TPM0->SC |= TPM_SC_TOF(1);  // Clear the TOF
 }
 
 /*
@@ -992,14 +992,41 @@ void TPM0_IRQHandler(void)
  */
 void ADC0_IRQHandler(void)
 {
-    MTR_dcSpeed = ADC0->R[0];  // Read conversion result and clear COCO flag
+    int result = ADC0->R[0];  // Read conversion result and clear COCO flag
 
     if (currentMode == MODE_1_ANALOG_SERVO_POS)
     {
-        // CDL=> Fill out later
+        // Range where Photo Resistors operate:
+        // 1.65V +-0.35V (1.3V - 2V)
+        // Step Size = VREF / NUM_STEPS = 3.3V/4096 = 805.66 uV
+        float voltage = result / 1241;
+
+        MTR_servoAngularPos = -90 + (voltage * 55);
+
+        if (ADC0->SC1[0] & 0x04)
+        {
+            if ((1.3 < voltage) && (voltage < 3.3))
+            {
+                // Set servo position to a certain angular position
+                TPM0->CONTROLS[2].CnV = 1659 +
+                                    (MTR_servoAngularPos + 90) * 33;
+            }
+            else
+            {
+                ADC0->SC1[0] &= ~0x1F;  // Start conversion on channel 0
+            }
+        }
+        else
+        {
+            // Set servo position to a certain angular position
+            TPM0->CONTROLS[2].CnV = 1659 +
+                                (MTR_servoAngularPos + 90) * 33;
+        }
     }
     else if (currentMode == MODE_2_ANALOG_MTR_SPD)
     {
+        MTR_dcSpeed = result;
+
         // Set the DC Motor speed to a certain speed
         TPM0->CONTROLS[3].CnV = 18000 + (MTR_dcSpeed * 10);
     }
