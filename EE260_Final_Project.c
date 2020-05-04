@@ -167,7 +167,7 @@ void setCurrentMode(modes mode)
     // Set the current mode
     currentMode = mode;
 
-    // Print the current mode to the terminal and LCD  // CDL=> Add more info to the LCD later
+    // Print the current mode to the terminal and LCD
     LCD_print(getModeName(currentMode));
     UART0_println(getModeName(currentMode));
 
@@ -209,7 +209,7 @@ void setCurrentMode(modes mode)
         SysTick->CTRL = 0;       // Disable timer
     }
 
-    // Enable/Disable motor PWM timer channels // CDL=> Could be combined with above switch statement
+    // Enable/Disable motor PWM timer channels
     switch (currentMode)
     {
         case MODE_1_ANALOG_SERVO_POS:
@@ -232,7 +232,14 @@ void setCurrentMode(modes mode)
 
 /*
  * This function initializes PortC for the keypad.
- * All pins are configured as GPIO input pin with pull-up enabled. CDL=> label cols and rows
+ * All pins are configured as GPIO input pin with pull-up enabled. Only the
+ * first two rows and the first three cols were uses for space purposes.
+ *
+ * PTD0 -> Row 1 (Output)
+ * PTD2 -> Row 2 (Output)
+ * PTD3 -> Col 1 (Input)
+ * PTD4 -> Col 2 (Input)
+ * PTD5 -> Col 3 (Input)
  *
  * Arguments: None
  *
@@ -264,7 +271,7 @@ void KP_init(void)
     PTD->PDDR     |= GPIO_PDDR_PDD(0x05);  // Make rows outputs, cols inputs
     PTD->PCOR     |= GPIO_PCOR_PTCO(0x05); // Enable all rows
 
-    NVIC_SetPriority(PORTD_IRQn, 0);       // CDL=> Needed?
+    NVIC_SetPriority(PORTD_IRQn, 0);
     NVIC_EnableIRQ(PORTD_IRQn);            // Enable IRQ31 (PTD interrupts)
 }
 
@@ -367,6 +374,7 @@ void UART0_init(void)
     PORTA->PCR[2]   = PORT_PCR_MUX(2);        // Make PTA2 UART0_Tx pin
     PORTA->PCR[1]   = PORT_PCR_MUX(2);        // Make PTA1 UART0_Rx pin
 
+    NVIC_SetPriority(PORTD_IRQn, 1);
     NVIC_EnableIRQ(UART0_IRQn);               // Enable IRQ12 (UART0_IRQn)
 }
 
@@ -380,7 +388,7 @@ void UART0_init(void)
  */
 void UART0_TransmitPoll(char data)
 {
-    // Wait until transmit register is empty  // CDL=> Use interrupts?
+    // Wait until transmit register is empty
     while (!(UART0->S1 & UART_S1_TDRE_MASK));
 
     // Send data
@@ -512,12 +520,19 @@ void UART0_IRQHandler(void)
 
                 UART0_receiveCounter = 0;  // Reset buffer
             }
-            else if (isalnum(character) || ispunct(character))  // CDL=> Add backspace?
+            else if (isalnum(character) || ispunct(character))
             {
                 UART0_TransmitPoll(character);
 
                 // Add character to receive buffer
                 UART0_receiveBuffer[UART0_receiveCounter++] = character;
+            }
+            else if (character == 0x7F)
+            {
+                UART0_TransmitPoll(character);
+
+                // Remove previous character receive buffer
+                UART0_receiveCounter--;
             }
 
             // Overflow case (simply reset buffer counter)
@@ -527,7 +542,6 @@ void UART0_IRQHandler(void)
             }
         }
     }
-    // CDL=> Add transmit interrupts?
 }
 
 /*
@@ -698,7 +712,8 @@ void US_CaptureTimerInit(void)
     TPM1->SC               |= TPM_SC_PS(6);         // Prescaler of /2^6 = /64
     TPM1->SC               |= TPM_SC_TOF(1);        // Clear TOF
     TPM1->SC               |= TPM_SC_CMOD(1);       // Enable timer
-    NVIC_SetPriority(PORTD_IRQn, 1);                // CDL=> Needed?
+
+    NVIC_SetPriority(PORTD_IRQn, 1);
     NVIC_EnableIRQ(TPM1_IRQn);                      // Enable IRQ18 (TPM1)
 }
 
@@ -780,7 +795,7 @@ void TPM1_IRQHandler(void)
                 TPM2->MOD = 1000 + 208 * US_distanceInches;
                 TPM2->CONTROLS[0].CnV = TPM2->MOD / 2;
                 TPM2->SC |= TPM_SC_CMOD(1);            // Enable buzzer
-                // CDL=> Stop Motor Later
+                TPM0->SC &= ~TPM_SC_CMOD(3);           // Disable Motor PWM
             }
             else if (US_distanceFeet < (float)2.0)
             {
@@ -792,13 +807,15 @@ void TPM1_IRQHandler(void)
                 TPM2->MOD = 1000 + 208 * US_distanceInches;
                 TPM2->CONTROLS[0].CnV = TPM2->MOD / 2;
                 TPM2->SC |= TPM_SC_CMOD(1);            // Enable buzzer
+                TPM0->SC &= ~TPM_SC_CMOD(3);           // Disable Motor PWM
             }
             else
             {
                 // All LED's off
                 PTD->PSOR |= GPIO_PSOR_PTSO(0x02);     // Turn off Blue LED
                 PTB->PSOR |= GPIO_PSOR_PTSO(0x40000);  // Turn off Red LED
-                TPM2->SC &= ~TPM_SC_CMOD(1);           // Disable buzzer
+                TPM2->SC &= ~TPM_SC_CMOD(3);           // Disable buzzer
+                TPM0->SC |= TPM_SC_CMOD(1);            // Enable Motor PWM
             }
         }
         US_index++;
@@ -874,7 +891,7 @@ void MTR_PWMTimerInit(void)
     TPM0->SC               |= TPM_SC_CMOD(1);  // Enable counter for PWM
     TPM0->SC               |= TPM_SC_TOIE(1);  // Enable Timer overflow interrupt
 
-    // CDL=> Set a priority?
+    NVIC_SetPriority(PORTD_IRQn, 1);
     NVIC_EnableIRQ(TPM0_IRQn);      // Enable IRQ17 (TPM0)
 }
 
@@ -950,8 +967,9 @@ void ADC0_init(void)
                      ADC_CFG1_MODE(1)   |
                      ADC_CFG1_ADICLK(0);
 
-    // CDL=> Set interrupt priority?
+    NVIC_SetPriority(PORTD_IRQn, 1);
     NVIC_EnableIRQ(ADC0_IRQn);         // Enable ADC0 interrupt
+
     ADC0->SC1[0] |= ADC_SC1_AIEN_MASK; // Set up ADC0 interface to use interrupt
 }
 
