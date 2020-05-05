@@ -239,7 +239,7 @@ void setCurrentMode(modes mode)
 }
 
 /*
- * This function initializes PortC for the keypad.
+ * This function initializes PortD for the keypad.
  * All pins are configured as GPIO input pin with pull-up enabled. Only the
  * first two rows and the first three cols were uses for space purposes.
  *
@@ -849,7 +849,7 @@ void TPM1_IRQHandler(void)
                 TPM2->MOD = 1000 + 208 * US_distanceInches;
                 TPM2->CONTROLS[0].CnV = TPM2->MOD / 2;
                 TPM2->SC |= TPM_SC_CMOD(1);            // Enable buzzer
-                TPM0->SC &= ~TPM_SC_CMOD(3);           // Disable Motor PWM
+                TPM0->SC |= TPM_SC_CMOD(1);            // Enable Motor PWM
             }
             else
             {
